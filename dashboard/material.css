@@ -1,0 +1,326 @@
+/*
+ScriptWatch dimensional material layer v0.1.0
+
+Presentation-only layer. Hue remains semantic. Shading, highlights, bevels,
+reflections, and glow add physical depth without introducing new state colors.
+Motion remains the liveness channel.
+*/
+
+:root {
+  --sw-mat-highlight: rgba(255,255,255,.42);
+  --sw-mat-highlight-soft: rgba(255,255,255,.14);
+  --sw-mat-shadow: rgba(0,0,0,.72);
+  --sw-mat-recess: rgba(0,0,0,.46);
+  --sw-mat-glass: rgba(210,240,255,.055);
+  --sw-mat-edge: rgba(190,225,240,.12);
+}
+
+/* Modern dark-metal chassis. Instrument depth lives in the controls. */
+.column-panel,
+.instrument-card,
+.metric-card,
+.observer-card,
+.spark-card,
+.counter-section,
+.alert-card,
+.memory-instrument,
+.process-only-summary,
+.process-only-banner,
+.tile,
+.cell,
+.node,
+.rig {
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,.028), transparent 19%),
+    linear-gradient(180deg, rgba(14,27,35,.98), rgba(5,12,16,.99));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.055),
+    inset 0 -1px 0 rgba(0,0,0,.72),
+    inset 0 0 22px rgba(0,0,0,.12),
+    0 2px 8px rgba(0,0,0,.22);
+}
+
+/* Circular instruments: recessed bezel, glass face, luminous state ring. */
+.ring-gauge {
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.035),
+    inset 0 0 18px rgba(0,0,0,.72),
+    0 1px 0 rgba(255,255,255,.08),
+    0 5px 13px rgba(0,0,0,.55),
+    0 0 18px color-mix(in srgb, var(--state-color) 14%, transparent) !important;
+}
+
+.ring-gauge::before {
+  background:
+    radial-gradient(circle at 38% 28%, rgba(255,255,255,.10), transparent 20%),
+    radial-gradient(circle at 50% 72%, rgba(0,0,0,.45), transparent 62%),
+    linear-gradient(145deg, rgba(16,31,39,.98), rgba(3,8,11,.995)) !important;
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,.08),
+    inset 0 -8px 18px rgba(0,0,0,.62),
+    inset 0 0 0 1px rgba(128,180,200,.07),
+    0 0 0 3px rgba(0,0,0,.55) !important;
+}
+
+.ring-center strong {
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.10),
+    0 0 10px color-mix(in srgb, var(--state-color) 28%, transparent) !important;
+}
+
+.activity-ring::after {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--state-color) 55%, transparent));
+}
+
+/* Small domed source/state lamps. Hue still comes from state. */
+.source-lamp,
+.harness-indicator-lamp,
+.counter-source-lamp,
+.harness-off-lamp,
+.process-only-lamp,
+.dot {
+  position: relative;
+  background-image:
+    radial-gradient(circle at 34% 28%, rgba(255,255,255,.92) 0 7%, rgba(255,255,255,.26) 8% 21%, transparent 23%),
+    radial-gradient(circle at 50% 62%, currentColor 0 42%, color-mix(in srgb, currentColor 74%, #000) 72%, #020506 100%) !important;
+  border: 1px solid color-mix(in srgb, currentColor 48%, #091116);
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,.35),
+    inset 0 -2px 3px rgba(0,0,0,.58),
+    0 1px 2px rgba(0,0,0,.65),
+    0 0 8px color-mix(in srgb, currentColor 54%, transparent) !important;
+}
+
+/* Source bus: recessed wiring channel plus travelling sample packets. */
+.source-node {
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,.025), transparent 42%),
+    linear-gradient(180deg, rgba(13,25,32,.95), rgba(5,12,16,.98));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), inset 0 -1px 0 rgba(0,0,0,.65);
+}
+
+.source-node::after {
+  height: 4px !important;
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.22), transparent 46%),
+    linear-gradient(90deg, color-mix(in srgb, var(--source-color) 28%, #071015), var(--source-color), color-mix(in srgb, var(--source-color) 42%, #071015), transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 5px color-mix(in srgb, var(--source-color) 30%, transparent);
+}
+
+.source-node:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  top: calc(50% - 3px);
+  right: -1px;
+  width: 18px;
+  height: 6px;
+  border-radius: 5px;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.82) 0 15%, rgba(255,255,255,.18) 28%, transparent 44%),
+    linear-gradient(90deg, color-mix(in srgb, var(--source-color) 45%, #03100a), var(--source-color) 48%, color-mix(in srgb, var(--source-color) 50%, #fff) 55%, var(--source-color) 72%, color-mix(in srgb, var(--source-color) 50%, #020506));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--source-color) 55%, transparent), 0 1px 2px rgba(0,0,0,.72);
+}
+
+.source-node.state-live:not(:last-child)::before,
+.source-node.state-limit:not(:last-child)::before {
+  opacity: .9;
+  animation: swMaterialPacket 2.2s linear infinite;
+}
+
+@keyframes swMaterialPacket {
+  from { transform: translateX(-56px); }
+  to { transform: translateX(14px); }
+}
+
+/* Counter cells gain an independent liveness runner. Numeric change is not
+   required for the counter to look alive. */
+.counter-card {
+  overflow: hidden;
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 32%),
+    linear-gradient(180deg, rgba(16,30,38,.96), rgba(6,14,18,.985));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.055),
+    inset 0 -1px 0 rgba(0,0,0,.78),
+    inset 0 0 12px rgba(0,0,0,.16),
+    0 1px 2px rgba(0,0,0,.38);
+}
+
+.counter-card::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 4px;
+  height: 3px;
+  border-radius: 3px;
+  opacity: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.50), transparent 42%),
+    linear-gradient(90deg,
+      transparent 0 6%,
+      color-mix(in srgb, var(--counter-state) 36%, #05090b) 14%,
+      var(--counter-state) 40%,
+      color-mix(in srgb, var(--counter-state) 62%, #fff) 50%,
+      var(--counter-state) 60%,
+      color-mix(in srgb, var(--counter-state) 30%, #05090b) 86%,
+      transparent 94%);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--counter-state) 48%, transparent);
+  transform: translateX(-115%);
+}
+
+.counter-card.state-live::after,
+.counter-card.state-limit::after {
+  opacity: .82;
+  animation: swCounterRunner 2.6s ease-in-out infinite;
+}
+
+@keyframes swCounterRunner {
+  0% { transform: translateX(-115%); }
+  46%, 54% { transform: translateX(0%); }
+  100% { transform: translateX(115%); }
+}
+
+.counter-card strong {
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.08),
+    0 0 7px color-mix(in srgb, var(--counter-state) 16%, transparent) !important;
+}
+
+/* Capacity meters: glass track, bevelled fill, travelling specular highlight. */
+.capacity-track {
+  border-color: rgba(113,150,166,.28) !important;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.035), transparent 36%, rgba(0,0,0,.16)),
+    repeating-linear-gradient(to top, rgba(255,255,255,.028) 0 3px, transparent 3px 7px),
+    linear-gradient(180deg, #03080b, #071116) !important;
+  box-shadow: inset 2px 0 5px rgba(0,0,0,.62), inset -1px 0 1px rgba(255,255,255,.035), 0 1px 0 rgba(255,255,255,.03);
+}
+
+.capacity-fill {
+  overflow: hidden;
+  border-top: 1px solid color-mix(in srgb, var(--meter-color) 72%, #fff);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--meter-color) 45%, #020807), var(--meter-color) 45%, color-mix(in srgb, var(--meter-color) 66%, #fff) 55%, var(--meter-color) 67%, color-mix(in srgb, var(--meter-color) 45%, #020807)) !important;
+  box-shadow:
+    inset 1px 0 1px rgba(255,255,255,.16),
+    inset -2px 0 3px rgba(0,0,0,.40),
+    0 0 9px color-mix(in srgb, var(--meter-color) 38%, transparent) !important;
+}
+
+.capacity-fill::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  height: 9px;
+  bottom: -12px;
+  opacity: 0;
+  background: linear-gradient(to top, transparent, rgba(255,255,255,.68), transparent);
+  filter: blur(.2px);
+}
+
+.capacity-meter.state-live .capacity-fill::after,
+.capacity-meter.state-limit .capacity-fill::after {
+  opacity: .58;
+  animation: swMeterGlint 2.1s linear infinite;
+}
+
+@keyframes swMeterGlint {
+  from { transform: translateY(0); }
+  to { transform: translateY(-86px); }
+}
+
+/* Generic laboratory instruments used by workbench/liveness/wall specimens. */
+.track,
+.rail,
+.band {
+  border: 1px solid rgba(100,135,150,.20);
+  background-image: linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.34));
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.72), inset 0 -1px 0 rgba(255,255,255,.025), 0 1px 0 rgba(255,255,255,.025);
+}
+
+.fill,
+.rail i,
+.band i {
+  position: relative;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.38), inset 0 -2px 3px rgba(0,0,0,.40), 0 0 7px currentColor;
+}
+
+.rail i::after,
+.band i::after,
+.fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.48) 0 14%, rgba(255,255,255,.10) 25%, transparent 48%, rgba(0,0,0,.18) 100%),
+    linear-gradient(90deg, rgba(0,0,0,.18), transparent 25%, rgba(255,255,255,.15) 50%, transparent 75%, rgba(0,0,0,.22));
+}
+
+.ladder u,
+.meter-seg {
+  border-radius: 2px;
+  border: 1px solid rgba(120,150,164,.08);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.10), inset 0 -1px 2px rgba(0,0,0,.52);
+}
+
+.ctr-val,
+.meter-read,
+.tile-state {
+  text-shadow: 0 1px 0 rgba(255,255,255,.08), 0 2px 8px rgba(0,0,0,.65);
+}
+
+/* Wall tiles get a restrained glass sheen. Fine detail disappears at distance;
+   motion and hue remain dominant. */
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.045), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,.018), transparent 38%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045), inset 0 -1px 0 rgba(0,0,0,.55);
+}
+
+.band {
+  border-radius: 4px;
+  background-color: #03080b !important;
+}
+
+.band i {
+  border-top: 1px solid rgba(255,255,255,.40);
+  border-bottom: 1px solid rgba(0,0,0,.45);
+}
+
+.wc-face {
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 30%, rgba(255,255,255,.055), transparent 28%), radial-gradient(circle, #101a20, #03080b 72%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -4px 10px rgba(0,0,0,.48), 0 2px 7px rgba(0,0,0,.48);
+}
+
+.btn {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.08));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 2px rgba(0,0,0,.34);
+}
+
+/* Accessibility: preserve state semantics while removing continuous motion. */
+@media (prefers-reduced-motion: reduce) {
+  .source-node.state-live:not(:last-child)::before,
+  .source-node.state-limit:not(:last-child)::before,
+  .counter-card.state-live::after,
+  .counter-card.state-limit::after,
+  .capacity-meter.state-live .capacity-fill::after,
+  .capacity-meter.state-limit .capacity-fill::after {
+    animation: none !important;
+    transform: none !important;
+  }
+}
