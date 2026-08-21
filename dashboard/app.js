@@ -81,6 +81,13 @@ function statusClass(status) {
   return "collecting";
 }
 
+function setTopStatus(status, text) {
+  const cls = statusClass(status);
+  $("status-dot").className = `status-dot ${cls}`;
+  $("status-text").className = `status-text status-${cls}`;
+  $("status-text").textContent = text;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -100,6 +107,11 @@ function alertClass(text) {
   return "";
 }
 
+function setQualification(card, collecting) {
+  card.classList.toggle("unqualified", collecting);
+  card.classList.toggle("qualified", !collecting);
+}
+
 function render(payload) {
   const latest = payload.latest;
   if (!latest) {
@@ -114,11 +126,11 @@ function render(payload) {
   const noHeartbeat = !job.heartbeatSeen;
 
   $("job-name").textContent = job.name;
-  $("status-text").textContent = `${job.status}${job.statusNote ? " · " + job.statusNote : ""}`;
-  $("status-dot").className = `status-dot ${statusClass(job.status)}`;
+  setTopStatus(job.status, `${job.status}${job.statusNote ? " · " + job.statusNote : ""}`);
 
   $("job-panel").classList.toggle("process-only", noHeartbeat);
   $("process-only-banner").hidden = !noHeartbeat;
+  $("process-only-summary").hidden = !noHeartbeat;
 
   const percent = job.percent;
   $("progress-percent").textContent = percent === null ? "--" : `${num(percent, 1)}%`;
@@ -140,6 +152,16 @@ function render(payload) {
   $("heartbeat-host").textContent = job.host || "--";
   $("heartbeat-path").textContent = job.heartbeatPath || "process telemetry only";
 
+  const monitorElapsed = latest.monitor.started == null ? null : latest.timestamp - latest.monitor.started;
+  $("po-pid").textContent = integer(proc.pid);
+  $("po-probe").textContent = proc.backend || "--";
+  $("po-monitor-elapsed").textContent = duration(monitorElapsed);
+  $("po-uptime").textContent = duration(proc.uptimeSeconds);
+  $("po-samples").textContent = integer(latest.monitor.samples);
+  $("po-coverage").textContent = duration(trends.coverageSeconds);
+  $("po-required").textContent = duration(trends.coverageRequiredSeconds);
+  $("po-csv-path").textContent = latest.monitor.csvPath || "CSV path pending…";
+
   $("cpu-value").textContent = proc.cpuPct == null ? "--" : `${num(proc.cpuPct, 1)}%`;
   setGauge($("cpu-gauge"), proc.cpuPct || 0);
 
@@ -153,8 +175,12 @@ function render(payload) {
   $("memory-slope").textContent = memoryText;
   $("memory-slope-foot").textContent = memoryText;
   $("memory-coverage").textContent = trends.memoryCollecting
-    ? collectingText(trends)
+    ? `raw samples · ${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`
     : `${duration(trends.coverageSeconds)} coverage`;
+  $("memory-qualification").textContent = trends.memoryCollecting
+    ? "raw samples · trend not yet qualified"
+    : "least-squares slope · qualified";
+  setQualification($("memory-spark-card"), trends.memoryCollecting);
 
   $("working-value").textContent = num(proc.workingMb, 1);
   $("pagefile-value").textContent = proc.pagefileMb == null ? "--" : `${num(proc.pagefileMb, 1)} MB`;
@@ -170,8 +196,13 @@ function render(payload) {
   const trend = trends.throughputCollecting ? "collecting…" : (trends.throughput || "stable");
   $("throughput-trend").textContent = trend;
   $("throughput-coverage").textContent = trends.throughputCollecting
-    ? collectingText(trends)
+    ? `raw samples · ${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`
     : `${duration(trends.coverageSeconds)} coverage`;
+  $("rate-qualification").textContent = trends.throughputCollecting
+    ? "raw samples · trend not yet qualified"
+    : "throughput trend · qualified";
+  $("rate-coverage").textContent = duration(trends.coverageSeconds);
+  setQualification($("rate-spark-card"), trends.throughputCollecting);
   $("trend-arrow").textContent = trend === "rising" ? "↗" : trend === "falling" ? "↘" : "→";
   $("trend-arrow").style.color = trend === "falling" ? "var(--amber)" : trend === "rising" ? "var(--green)" : "var(--cyan)";
   $("rate-now").textContent = `${num(job.ratePerMin, 2)} tgt/min`;
@@ -206,13 +237,12 @@ function render(payload) {
 
   if (payload.processExited) {
     $("footer-status").textContent = "Observed InDesign process exited. Historical telemetry remains displayed.";
-    $("status-dot").className = "status-dot error";
-    // Without this the lamp reads red beside the word RUNNING, which is the
-    // last status the collector published before the process disappeared.
-    $("status-text").textContent = "PROCESS EXITED · last known state shown";
+    setTopStatus("error", "PROCESS EXITED · last known state shown");
   } else if (stale) {
     $("footer-status").textContent = `Sampler has not reported for ${duration(sampleAge)} · telemetry below is stale`;
     $("status-dot").className = "status-dot stale";
+    $("status-text").className = "status-text status-stale";
+    $("status-text").textContent = `STALE · no sampler update for ${duration(sampleAge)}`;
   } else if (payload.error) {
     $("footer-status").textContent = `Collector warning: ${payload.error}`;
   } else {
@@ -229,7 +259,7 @@ async function poll() {
     render(await response.json());
   } catch (err) {
     $("footer-status").textContent = `Dashboard connection error: ${err.message}`;
-    $("status-dot").className = "status-dot error";
+    setTopStatus("error", "DASHBOARD CONNECTION ERROR");
   }
 }
 
