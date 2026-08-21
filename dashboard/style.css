@@ -53,6 +53,7 @@ h1 { margin: 3px 0 0; font-size: 22px; font-weight: 650; letter-spacing: .01em; 
 .status-dot.stalled, .status-dot.error { color: var(--red); }
 .status-dot.no-heartbeat { color: var(--amber); }
 .status-dot.collecting { color: var(--cyan); }
+.status-dot.stale { color: var(--amber); animation: none; }
 @keyframes livePulse {
   0%, 100% { opacity: .72; box-shadow: 0 0 8px currentColor; }
   50% { opacity: 1; box-shadow: 0 0 19px currentColor; }

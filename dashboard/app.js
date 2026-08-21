@@ -26,26 +26,49 @@ function setGauge(el, percent) {
 }
 
 function sparkline(svg, history, key) {
-  const values = history.map(p => Number(p[key])).filter(v => Number.isFinite(v));
-  if (values.length < 2) {
+  // Number(null) is 0, so a JSON null read straight into the trace plots a gap
+  // in the data as a real reading at the bottom of the scale. Throughput is
+  // null until the collector has enough samples to compute a rate, and handles
+  // are null on non-Windows backends, so both would otherwise open with a
+  // fabricated climb from zero.
+  const points = history.map(p => ({
+    t: Number(p.t),
+    v: (p[key] === null || p[key] === undefined || !Number.isFinite(Number(p[key])))
+      ? null
+      : Number(p[key]),
+  }));
+  const known = points.filter(p => p.v !== null);
+  if (known.length < 2) {
     svg.innerHTML = "";
     return;
   }
 
-  let min = Math.min(...values);
-  let max = Math.max(...values);
+  let min = Math.min(...known.map(p => p.v));
+  let max = Math.max(...known.map(p => p.v));
   if (max === min) {
     max += 1;
     min -= 1;
   }
 
-  const points = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * 400;
-    const y = 66 - ((v - min) / (max - min)) * 60;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
+  // x is derived from the timestamp, not the array index, so all three charts
+  // share one time axis and a gap stays visibly a gap.
+  const t0 = points[0].t;
+  const span = (points[points.length - 1].t - t0) || 1;
+  const segments = [];
+  let run = [];
+  for (const p of points) {
+    if (p.v === null) {
+      if (run.length > 1) segments.push(run);
+      run = [];
+      continue;
+    }
+    const x = ((p.t - t0) / span) * 400;
+    const y = 66 - ((p.v - min) / (max - min)) * 60;
+    run.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  if (run.length > 1) segments.push(run);
 
-  svg.innerHTML = `<polyline points="${points}"></polyline>`;
+  svg.innerHTML = segments.map(seg => `<polyline points="${seg.join(" ")}"></polyline>`).join("");
 }
 
 function statusClass(status) {
@@ -172,9 +195,24 @@ function render(payload) {
   $("csv-path").textContent = latest.monitor.csvPath;
   $("last-sample").textContent = `Last sample ${new Date(latest.timestamp * 1000).toLocaleTimeString()}`;
 
+  // The sampler can stall without the HTTP server noticing: a PowerShell probe
+  // can sit in a subprocess for up to 20 seconds. Compare the sample age
+  // against the observed cadence rather than trusting that data is current.
+  const cadence = history.length > 1
+    ? Math.max(1, (history[history.length - 1].t - history[0].t) / (history.length - 1))
+    : 5;
+  const sampleAge = Date.now() / 1000 - latest.timestamp;
+  const stale = sampleAge > Math.max(15, cadence * 3);
+
   if (payload.processExited) {
     $("footer-status").textContent = "Observed InDesign process exited. Historical telemetry remains displayed.";
     $("status-dot").className = "status-dot error";
+    // Without this the lamp reads red beside the word RUNNING, which is the
+    // last status the collector published before the process disappeared.
+    $("status-text").textContent = "PROCESS EXITED · last known state shown";
+  } else if (stale) {
+    $("footer-status").textContent = `Sampler has not reported for ${duration(sampleAge)} · telemetry below is stale`;
+    $("status-dot").className = "status-dot stale";
   } else if (payload.error) {
     $("footer-status").textContent = `Collector warning: ${payload.error}`;
   } else {
