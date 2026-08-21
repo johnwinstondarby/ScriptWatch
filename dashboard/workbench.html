@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScriptWatch Instrument Workbench</title>
+<style>
+:root{
+  --bg:#070c10;--panel:#0d151a;--panel2:#111a20;--rule:#22323a;--rule2:#31454f;
+  --live:#2fd98c;--dormant:#c89b3c;--limit:#e4682a;--fault:#d6463e;--never:#465a65;
+  --text:#c8d6dd;--muted:#6c838e;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 "Segoe UI",sans-serif}
+.wrap{max-width:1260px;margin:auto;padding:24px}
+header{display:flex;justify-content:space-between;gap:24px;padding-bottom:14px;border-bottom:1px solid var(--rule)}
+h1,h2{margin:0;font-weight:600}.eyebrow{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.controls{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:18px 0}.controls button{padding:7px 10px;border:1px solid var(--rule2);background:var(--panel);color:var(--muted);font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}.controls button[aria-pressed="true"]{color:var(--live);border-color:#1b7a4f}.controls label{margin-left:auto;font:10px var(--mono);color:var(--muted)}
+.specimen{margin-top:26px}.specimen-head{display:flex;gap:12px;align-items:baseline;margin-bottom:7px}.specimen-head h2{font-size:14px}.specimen-head span{font:10px var(--mono);color:var(--muted)}
+.strip{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule)}.cell{min-height:142px;background:var(--panel2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:14px}.label{font:9px var(--mono);letter-spacing:.12em;text-align:center;text-transform:uppercase}.label small{display:block;margin-top:3px;color:var(--muted);text-transform:none;letter-spacing:.04em}
+.dial{position:relative;width:96px;height:96px}.dial svg{display:block}.dial-read{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}.dial-read strong{font:17px var(--mono)}.dial-read small{font:9px var(--mono);color:var(--muted)}
+.lane{width:170px}.lane svg{display:block;width:100%;height:26px}.lane-cap{display:flex;justify-content:space-between;font:9px var(--mono);color:var(--muted)}
+.counter{text-align:center;width:100%}.counter strong{font:22px var(--mono)}.track{height:2px;background:#1a252b;margin-top:9px}.fill{height:100%;width:0;background:var(--live)}
+.meter{display:flex;gap:8px;align-items:flex-end;height:76px}.meter-col{display:flex;flex-direction:column-reverse;gap:2px;width:14px}.meter-seg{height:5px;background:#1a252b}.meter-read{font:10px var(--mono);color:var(--muted);align-self:flex-end}
+.rig{margin-top:34px;border:1px solid var(--rule);background:var(--panel)}.rig-head{display:flex;gap:10px;padding:12px;border-bottom:1px solid var(--rule)}.rig-head span{font:10px var(--mono);color:var(--muted)}.rig-head .stamp{margin-left:auto}.chain{display:grid;grid-template-columns:1fr 68px 1fr 68px 1fr 68px 1fr;align-items:center;padding:20px 14px}.node{padding:12px;border:1px solid var(--rule2);background:var(--panel2);text-align:center}.node .name{font:9px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}.node .value{font:18px var(--mono);margin-top:5px}.node .state{font:9px var(--mono);margin-top:6px}.connector svg{width:100%;height:22px}
+.notes{margin-top:28px;padding-top:16px;border-top:1px solid var(--rule)}.notes table{width:100%;border-collapse:collapse}.notes td{padding:6px;border-bottom:1px solid #17242b}.notes td:first-child{width:160px;font:10px var(--mono);text-transform:uppercase}
+@media(max-width:900px){.strip{grid-template-columns:1fr 1fr}.chain{grid-template-columns:1fr;gap:10px}.connector{transform:rotate(90deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header><div><div class="eyebrow">ScriptWatch · instrument library</div><h1>Instrument Workbench</h1><p>Five data states side by side. No backend and no InDesign.</p></div><div class="eyebrow">fake driver · 1 second samples</div></header>
+<div class="controls">
+  <button id="run" aria-pressed="true">Running</button><button id="drop">Drop heartbeat</button><button id="limit">Push to limit</button><button id="fault">Fault process</button><button id="reset">Reset to never sampled</button>
+  <label>Throughput <input id="rate" type="range" min="0" max="100" value="46"> <span id="rate-read">55/min</span></label>
+</div>
+<section class="specimen"><div class="specimen-head"><h2>SegmentedDial</h2><span>(state, value) · bounded ratio</span></div><div class="strip" id="dial-strip"></div></section>
+<section class="specimen"><div class="specimen-head"><h2>FlowLane</h2><span>(state, value) · unbounded rate</span></div><div class="strip" id="lane-strip"></div></section>
+<section class="specimen"><div class="specimen-head"><h2>Counter</h2><span>(state, value) · monotonic total</span></div><div class="strip" id="counter-strip"></div></section>
+<section class="specimen"><div class="specimen-head"><h2>Meter</h2><span>(state, value) · bounded headroom</span></div><div class="strip" id="meter-strip"></div></section>
+<section class="rig"><div class="rig-head"><strong>Wired rig</strong><span>Host → Process → Heartbeat → Harness</span><span class="stamp" id="stamp">--</span></div><div class="chain" id="chain"></div></section>
+<section class="notes"><h2>State contract</h2><table>
+<tr><td style="color:var(--never)">Never sampled</td><td>No value has arrived. Shows an em dash, never zero.</td></tr>
+<tr><td style="color:var(--live)">Live</td><td>Fresh value. Motion continues.</td></tr>
+<tr><td style="color:var(--dormant)">Dormant</td><td>Motion stops. Last known value remains visible in amber.</td></tr>
+<tr><td style="color:var(--limit)">At limit</td><td>Fresh bounded value has reached its limit. Motion continues in orange.</td></tr>
+<tr><td style="color:var(--fault)">Fault</td><td>Source reported an error. Motion stops and the current value is withheld.</td></tr>
+</table></section>
+</div>
+<script src="instrument_state.js"></script>
+<script>
+(() => {
+"use strict";
+const S=window.ScriptWatchInstrumentState; const C={never:"#465a65",live:"#2fd98c",dormant:"#c89b3c",limit:"#e4682a",fault:"#d6463e"};
+const reduced=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const states=[S.STATES.NEVER,S.STATES.LIVE,S.STATES.DORMANT,S.STATES.LIMIT,S.STATES.FAULT];
+const desc={never:"no sample",live:"fresh",dormant:"last known",limit:"bounded",fault:"error"};
+function el(tag,cls,parent){const n=document.createElement(tag);if(cls)n.className=cls;if(parent)parent.appendChild(n);return n}
+function svg(tag){return document.createElementNS("http://www.w3.org/2000/svg",tag)}
+function modelFor(state,value){let m=S.create(); if(state===S.STATES.DORMANT){m=S.transition(m,S.STATES.LIVE,value);return S.transition(m,S.STATES.DORMANT)} if(state===S.STATES.FAULT){m=S.transition(m,S.STATES.LIVE,value);return S.transition(m,S.STATES.FAULT)} return S.transition(m,state,state===S.STATES.NEVER?undefined:value)}
+function label(cell,state){const x=el("div","label",cell);x.style.color=C[state];x.innerHTML=`${state.replace("limit","at limit")}<small>${desc[state]}</small>`}
+class SegmentedDial{constructor(host,unit){this.model=S.create();this.shown=0;this.target=0;this.unit=unit;const box=el("div","dial",host),v=svg("svg");v.setAttribute("viewBox","0 0 100 100");box.appendChild(v);this.ticks=[];for(let i=0;i<32;i++){const a=(135+270*i/31)*Math.PI/180,l=svg("line");l.setAttribute("x1",50+36*Math.cos(a));l.setAttribute("y1",50+36*Math.sin(a));l.setAttribute("x2",50+45*Math.cos(a));l.setAttribute("y2",50+45*Math.sin(a));l.setAttribute("stroke-width","3.4");v.appendChild(l);this.ticks.push(l)}const r=el("div","dial-read",box);this.val=el("strong",null,r);el("small",null,r).textContent=unit}
+set(state,value){this.model=modelFor(state,value);const vw=S.view(this.model);if(vw.hasValue){this.target=vw.value;if(state===S.STATES.DORMANT)this.shown=vw.value}}
+tick(dt){const vw=S.view(this.model);if(vw.moving){const k=reduced?1:Math.min(1,dt*3.2);this.shown+=(this.target-this.shown)*k}const lit=Math.round(this.shown*32);this.ticks.forEach((t,i)=>t.setAttribute("stroke",vw.state===S.STATES.NEVER?"#1a252b":i<lit?C[vw.state]:"#1a252b"));this.val.textContent=vw.state===S.STATES.FAULT?"ERR":vw.hasValue?(this.shown*100).toFixed(1):"—";this.val.style.color=C[vw.state]||"#465a65"}}
+class FlowLane{constructor(host){this.model=S.create();this.rate=0;this.offset=0;const box=el("div","lane",host),v=svg("svg");v.setAttribute("viewBox","0 0 170 26");box.appendChild(v);const tr=svg("rect");tr.setAttribute("x",0);tr.setAttribute("y",9);tr.setAttribute("width",170);tr.setAttribute("height",8);tr.setAttribute("fill","#111c22");v.appendChild(tr);this.bars=[];for(let i=0;i<11;i++){const b=svg("rect");b.setAttribute("y",10);b.setAttribute("width",13);b.setAttribute("height",6);v.appendChild(b);this.bars.push(b)}const cap=el("div","lane-cap",box);this.left=el("span",null,cap);this.right=el("span",null,cap)}set(state,value){this.model=modelFor(state,value);const vw=S.view(this.model);if(vw.hasValue)this.rate=vw.value}tick(dt){const vw=S.view(this.model);if(vw.moving&&this.rate>0&&!reduced)this.offset=(this.offset+(14+78*this.rate)*dt)%20;this.bars.forEach((b,i)=>{b.style.display=vw.state===S.STATES.NEVER?"none":"";b.setAttribute("x",i*20-20+this.offset);b.setAttribute("fill",C[vw.state]);b.setAttribute("opacity",vw.state===S.STATES.DORMANT||vw.state===S.STATES.FAULT?".55":i%4===0?"1":".5")});this.left.textContent=vw.state===S.STATES.NEVER?"no sample":vw.state===S.STATES.FAULT?"fault":vw.state===S.STATES.DORMANT?"last known":"flowing";this.right.textContent=vw.state===S.STATES.FAULT?"withheld":vw.hasValue?Math.round(this.rate*120)+"/min":"—"}}
+class Counter{constructor(host){this.model=S.create();this.shown=0;this.target=0;const box=el("div","counter",host);this.val=el("strong",null,box);const tr=el("div","track",box);this.fill=el("div","fill",tr)}set(state,value){this.model=modelFor(state,value);const vw=S.view(this.model);if(vw.hasValue){this.target=vw.value;if(state===S.STATES.DORMANT)this.shown=vw.value}}tick(dt){const vw=S.view(this.model);if(vw.moving){const k=reduced?1:Math.min(1,dt*2.4);this.shown+=(this.target-this.shown)*k}this.val.textContent=vw.state===S.STATES.FAULT?"ERR":vw.hasValue?Math.round(this.shown).toLocaleString():"—";this.val.style.color=C[vw.state];this.fill.style.background=C[vw.state];this.fill.style.width=vw.hasValue?Math.min(100,this.shown/2883*100)+"%":"0"}}
+class Meter{constructor(host){this.model=S.create();this.shown=0;this.target=0;const box=el("div","meter",host);this.segs=[];for(let c=0;c<2;c++){const col=el("div","meter-col",box),a=[];for(let i=0;i<12;i++)a.push(el("div","meter-seg",col));this.segs.push(a)}this.read=el("div","meter-read",box)}set(state,value){this.model=modelFor(state,value);const vw=S.view(this.model);if(vw.hasValue){this.target=vw.value;if(state===S.STATES.DORMANT)this.shown=vw.value}}tick(dt){const vw=S.view(this.model);if(vw.moving){const k=reduced?1:Math.min(1,dt*2.8);this.shown+=(this.target-this.shown)*k}const lit=Math.round(this.shown*12);this.segs.forEach((col,c)=>col.forEach((s,i)=>s.style.background=vw.state===S.STATES.NEVER?"#1a252b":i<Math.max(0,lit-c)?C[vw.state]:"#1a252b"));this.read.textContent=vw.state===S.STATES.FAULT?"ERR":vw.hasValue?(this.shown*63.5).toFixed(1)+" GB":"—";this.read.style.color=C[vw.state]}}
+const registry=[];function build(id,factory,values){const host=document.getElementById(id);states.forEach(st=>{const cell=el("div","cell",host),inst=factory(cell),v=values(st);inst.set(st,v);registry.push(inst);label(cell,st)})}
+build("dial-strip",c=>new SegmentedDial(c,"% RAM"),s=>s===S.STATES.LIMIT?.97:.505);build("lane-strip",c=>new FlowLane(c),s=>s===S.STATES.LIMIT?.95:.42);build("counter-strip",c=>new Counter(c),s=>s===S.STATES.LIMIT?2883:1418);build("meter-strip",c=>new Meter(c),s=>s===S.STATES.LIMIT?.99:.44);
+const chain=document.getElementById("chain"),nodes=[],lanes=[];["Host","Process","Heartbeat","Harness"].forEach((name,i)=>{if(i){const c=el("div","connector",chain),l=new FlowLane(c);lanes.push(l)}const n=el("div","node",chain);el("div","name",n).textContent=name;nodes.push({value:el("div","value",n),state:el("div","state",n)})});
+let mode="run",rate=.46,seeded=true,t=0;const buttons=["run","drop","limit","fault","reset"];function setMode(m){mode=m;seeded=m!=="reset";buttons.forEach(x=>document.getElementById(x).setAttribute("aria-pressed",x===m))}buttons.forEach(x=>document.getElementById(x).onclick=()=>setMode(x));document.getElementById("rate").oninput=e=>{rate=Number(e.target.value)/100;document.getElementById("rate-read").textContent=Math.round(rate*120)+"/min"};
+function rigState(i){if(!seeded)return S.STATES.NEVER;if(mode==="fault")return i>=1?S.STATES.FAULT:S.STATES.LIVE;if(mode==="drop")return i>=2?S.STATES.DORMANT:S.STATES.LIVE;if(mode==="limit")return i===0?S.STATES.LIMIT:S.STATES.LIVE;return S.STATES.LIVE}
+let prev=performance.now();function frame(now){const dt=Math.min(.1,(now-prev)/1000);prev=now;t+=dt;registry.forEach(i=>i.tick(dt));nodes.forEach((n,i)=>{const st=rigState(i),val=i===1?7057+Math.sin(t)*40:Math.max(0,Math.min(1,[.68,.31,rate,.94][i]+Math.sin(t*.9)*.03))*100;const m=modelFor(st,val),vw=S.view(m);n.value.textContent=vw.state===S.STATES.FAULT?"ERR":vw.hasValue?(i===1?Math.round(vw.value):vw.value.toFixed(1)):"—";n.value.style.color=C[vw.state];n.state.textContent=vw.state.toUpperCase();n.state.style.color=C[vw.state]});lanes.forEach((l,i)=>{const st=rigState(i+1);l.set(st,rate);l.tick(dt)});document.getElementById("stamp").textContent=seeded?new Date().toLocaleTimeString()+" · sample":"awaiting first sample";requestAnimationFrame(frame)}requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
