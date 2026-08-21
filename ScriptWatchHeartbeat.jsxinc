@@ -1,5 +1,5 @@
 /**
- * ScriptWatchHeartbeat.jsxinc
+ * ScriptWatchHeartbeat.jsxinc 
  * ---------------------------
  * Publishes a small JSON heartbeat so an out-of-process monitor (scriptwatch.py)
  * can report job progress alongside Windows process telemetry.
