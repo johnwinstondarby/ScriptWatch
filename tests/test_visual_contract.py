@@ -53,6 +53,28 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn("InDesign process counters", contract)
         self.assertIn("Harness counters", contract)
 
+    def test_source_bays_are_spatially_separated(self):
+        js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
+        css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        self.assertIn("process-counter-bay", js)
+        self.assertIn("process-counter-mount", js)
+        self.assertIn("source-column-runtime", js)
+        self.assertIn("source-column-trends", js)
+        self.assertIn("process-counter-bay", css)
+        self.assertIn("Runtime Health", contract)
+        self.assertIn("Trends & Alerts", contract)
+
+    def test_harness_off_bay_remains_visible_as_capability_state(self):
+        js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
+        css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        self.assertIn("harness-off-bay", js)
+        self.assertIn("HARNESS DATA", js)
+        self.assertIn("No Harness counters are published", js)
+        self.assertIn("harness-off-bay", css)
+        self.assertIn("A Harness data bay remains visible even when Harness is OFF", contract)
+
     def test_reduced_motion_is_preserved(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
         source_css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
