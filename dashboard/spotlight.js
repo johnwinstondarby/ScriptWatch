@@ -1,5 +1,5 @@
 /*
-ScriptWatch instrument-console visual layer v0.1.1
+ScriptWatch instrument-console visual layer v0.2.0
 
 Presentation-only companion to dashboard/app.js. It derives source-state
 semantics from existing rendered values and classes. No collector contract is
@@ -9,6 +9,27 @@ changed here.
 (() => {
   const byId = id => document.getElementById(id);
   const finite = value => Number.isFinite(Number(value));
+
+  const COUNTER_SOURCE = {
+    "available-ram": "host",
+    "commit-headroom": "host",
+    "commit-peak": "host",
+    "system-cache": "host",
+    "kernel-paged": "host",
+    "kernel-nonpaged": "host",
+    "sys-processes": "host",
+    "sys-threads": "host",
+    "sys-handles": "host",
+    "private-delta": "process",
+    "working-set": "process",
+    "io-read": "process",
+    "io-write": "process",
+    "page-faults": "process",
+    "gdi": "process",
+    "user": "process",
+    "threads": "process",
+    "handles": "process"
+  };
 
   function classifyGlobalTelemetry() {
     const statusText = String(byId("status-text")?.textContent || "").toUpperCase();
@@ -53,6 +74,25 @@ changed here.
     topbar.insertAdjacentElement("afterend", bus);
   }
 
+  function ensureHarnessIndicator() {
+    if (byId("harness-indicator")) return;
+    const topStatus = document.querySelector(".top-status");
+    if (!topStatus) return;
+
+    const indicator = document.createElement("div");
+    indicator.id = "harness-indicator";
+    indicator.className = "harness-indicator state-unsupported";
+    indicator.setAttribute("aria-label", "ScriptWatch Harness state");
+    indicator.innerHTML = `
+      <span class="harness-indicator-lamp" aria-hidden="true"></span>
+      <div>
+        <span class="harness-indicator-label">HARNESS =</span>
+        <strong>OFF</strong>
+        <small>agentless observation</small>
+      </div>`;
+    topStatus.prepend(indicator);
+  }
+
   function setSource(id, state, text) {
     const node = document.querySelector(`.source-node[data-source="${id}"]`);
     if (!node) return;
@@ -60,6 +100,21 @@ changed here.
     node.classList.add(`state-${state}`);
     const strong = node.querySelector("strong");
     if (strong) strong.textContent = text;
+  }
+
+  function sourceState(id) {
+    const node = document.querySelector(`.source-node[data-source="${id}"]`);
+    if (!node) return "unsupported";
+    if (node.classList.contains("state-fault")) return "fault";
+    if (node.classList.contains("state-dormant")) return "dormant";
+    if (node.classList.contains("state-live")) return "live";
+    return "unsupported";
+  }
+
+  function setStateClass(node, state) {
+    if (!node) return;
+    node.classList.remove("state-live", "state-dormant", "state-fault", "state-unsupported");
+    node.classList.add(`state-${state}`);
   }
 
   function ensureCapacityRack() {
@@ -81,6 +136,80 @@ changed here.
     dialBank.insertAdjacentElement("afterend", rack);
   }
 
+  function counterSourceGroup(source, label, detail) {
+    const group = document.createElement("section");
+    group.className = `counter-source-group source-${source} state-unsupported`;
+    group.dataset.sourceGroup = source;
+    group.innerHTML = `
+      <div class="counter-source-heading">
+        <span class="counter-source-lamp" aria-hidden="true"></span>
+        <div>
+          <span>${label}</span>
+          <small>${detail}</small>
+        </div>
+        <strong>WAITING</strong>
+      </div>
+      <div class="counter-source-grid"></div>`;
+    return group;
+  }
+
+  function ensureCounterSourceGroups() {
+    const bank = byId("counter-bank");
+    if (!bank) return;
+
+    let hostGroup = bank.querySelector('[data-source-group="host"]');
+    let processGroup = bank.querySelector('[data-source-group="process"]');
+    let otherGroup = bank.querySelector('[data-source-group="other"]');
+
+    const directCards = Array.from(bank.children).filter(child => child.classList?.contains("counter-card"));
+    if (!hostGroup && !processGroup && directCards.length === 0) return;
+
+    if (!hostGroup) {
+      hostGroup = counterSourceGroup("host", "HOST COUNTERS", "Windows host telemetry");
+      processGroup = counterSourceGroup("process", "INDESIGN PROCESS COUNTERS", "agentless process telemetry");
+      otherGroup = counterSourceGroup("other", "OTHER COUNTERS", "unclassified telemetry");
+      otherGroup.hidden = true;
+      bank.appendChild(hostGroup);
+      bank.appendChild(processGroup);
+      bank.appendChild(otherGroup);
+      bank.classList.add("counter-source-bank");
+
+      const heading = bank.closest(".counter-section")?.querySelector(".counter-section-head span");
+      if (heading) heading.textContent = "Counters by source";
+    }
+
+    const cards = Array.from(bank.querySelectorAll(":scope > .counter-card"));
+    cards.forEach(card => {
+      const key = card.dataset.counter || "";
+      const source = COUNTER_SOURCE[key] || "other";
+      card.dataset.source = source;
+      const group = bank.querySelector(`[data-source-group="${source}"] .counter-source-grid`);
+      if (group) group.appendChild(card);
+      if (source === "other" && otherGroup) otherGroup.hidden = false;
+    });
+  }
+
+  function ensureHarnessCounterSection() {
+    const card = byId("harness-card");
+    const bank = byId("job-metric-bank");
+    if (!card || !bank) return;
+
+    bank.classList.add("harness-counter-bank");
+    bank.dataset.source = "harness";
+    if (!card.querySelector(".harness-counter-heading")) {
+      const heading = document.createElement("div");
+      heading.className = "harness-counter-heading state-unsupported";
+      heading.innerHTML = `
+        <span class="counter-source-lamp" aria-hidden="true"></span>
+        <div>
+          <span>HARNESS COUNTERS</span>
+          <small>semantic data published by the monitored script</small>
+        </div>
+        <strong>OFF</strong>`;
+      bank.insertAdjacentElement("beforebegin", heading);
+    }
+  }
+
   function gaugePercent(id) {
     const el = byId(id);
     if (!el) return null;
@@ -92,8 +221,7 @@ changed here.
   function setMeter(name, percent, state) {
     const meter = document.querySelector(`.capacity-meter[data-meter="${name}"]`);
     if (!meter) return;
-    meter.classList.remove("state-live", "state-dormant", "state-fault", "state-unsupported");
-    meter.classList.add(`state-${state}`);
+    setStateClass(meter, state);
 
     const available = percent !== null && finite(percent);
     const p = available ? Math.max(0, Math.min(100, Number(percent))) : 0;
@@ -115,22 +243,28 @@ changed here.
   function applyGaugeState(id, state) {
     const gauge = byId(id);
     if (!gauge) return;
-    gauge.classList.remove("state-live", "state-dormant", "state-fault", "state-unsupported");
-    gauge.classList.add(`state-${state}`);
+    setStateClass(gauge, state);
+  }
+
+  function stateForCounter(card, globalState) {
+    if (globalState === "fault") return "fault";
+    if (globalState === "dormant") return "dormant";
+
+    let source = card.dataset.source || "";
+    if (!source && card.closest("#job-metric-bank")) source = "harness";
+    if (!source && card.dataset.counter) source = COUNTER_SOURCE[card.dataset.counter] || "other";
+
+    const sourceStatus = source === "other" ? "live" : sourceState(source);
+    if (sourceStatus === "fault") return "fault";
+    if (sourceStatus === "dormant") return "dormant";
+    if (sourceStatus === "unsupported") return "unsupported";
+    if (card.classList.contains("unavailable")) return "dormant";
+    return "live";
   }
 
   function applyCounterStates(globalState) {
     document.querySelectorAll(".counter-card").forEach(card => {
-      card.classList.remove("state-live", "state-dormant", "state-fault", "state-unsupported");
-      if (globalState === "fault") {
-        card.classList.add("state-fault");
-      } else if (globalState === "dormant") {
-        card.classList.add("state-dormant");
-      } else if (card.classList.contains("unavailable")) {
-        card.classList.add("state-dormant");
-      } else {
-        card.classList.add("state-live");
-      }
+      setStateClass(card, stateForCounter(card, globalState));
     });
   }
 
@@ -164,13 +298,59 @@ changed here.
 
     const harnessVisible = harnessCard && !harnessCard.hidden;
     if (!harnessVisible) {
-      setSource("harness", "unsupported", "NOT PUBLISHED");
+      setSource("harness", "unsupported", "HARNESS = OFF");
     } else if (globalState === "fault") {
-      setSource("harness", "fault", harnessVersion || "FAULT");
+      setSource("harness", "fault", "HARNESS = ON · FAULT");
     } else if (globalState === "dormant") {
-      setSource("harness", "dormant", harnessVersion ? `${harnessVersion} · DORMANT` : "DORMANT");
+      setSource("harness", "dormant", "HARNESS = ON · DORMANT");
     } else {
-      setSource("harness", "live", harnessVersion ? `${harnessVersion} · LIVE` : "LIVE");
+      setSource("harness", "live", harnessVersion ? `HARNESS = ON · ${harnessVersion}` : "HARNESS = ON");
+    }
+  }
+
+  function updateHarnessIndicator(globalState) {
+    const indicator = byId("harness-indicator");
+    const card = byId("harness-card");
+    if (!indicator) return;
+
+    const harnessVisible = card && !card.hidden;
+    const version = String(byId("harness-version")?.textContent || "").trim();
+    const strong = indicator.querySelector("strong");
+    const small = indicator.querySelector("small");
+
+    let state = "unsupported";
+    let value = "OFF";
+    let detail = "agentless observation";
+
+    if (harnessVisible) {
+      state = globalState;
+      value = "ON";
+      detail = version && version !== "--" ? version : "published";
+      if (globalState === "dormant") detail += " · dormant";
+      if (globalState === "fault") detail += " · source unavailable";
+    }
+
+    setStateClass(indicator, state);
+    if (strong) strong.textContent = value;
+    if (small) small.textContent = detail;
+  }
+
+  function updateCounterSourceGroups() {
+    ["host", "process", "other"].forEach(source => {
+      const group = document.querySelector(`[data-source-group="${source}"]`);
+      if (!group) return;
+      const state = source === "other" ? "live" : sourceState(source);
+      setStateClass(group, state);
+      const status = group.querySelector(".counter-source-heading strong");
+      if (status) status.textContent = state.toUpperCase();
+    });
+
+    const harnessHeading = document.querySelector(".harness-counter-heading");
+    if (harnessHeading) {
+      const state = sourceState("harness");
+      setStateClass(harnessHeading, state);
+      const status = harnessHeading.querySelector("strong");
+      if (status) status.textContent = state === "unsupported" ? "OFF" : state.toUpperCase();
     }
   }
 
@@ -185,7 +365,11 @@ changed here.
 
   function updateVisualState() {
     ensureSourceBus();
+    ensureHarnessIndicator();
     ensureCapacityRack();
+    ensureCounterSourceGroups();
+    ensureHarnessCounterSection();
+
     const globalState = classifyGlobalTelemetry();
 
     ["progress-gauge", "cpu-gauge", "ram-gauge", "commit-gauge"].forEach(id => {
@@ -200,8 +384,10 @@ changed here.
       applyGaugeState(id, state);
     });
 
-    applyCounterStates(globalState);
     updateSourceBus(globalState);
+    updateHarnessIndicator(globalState);
+    updateCounterSourceGroups();
+    applyCounterStates(globalState);
     updateCapacity(globalState);
   }
 
