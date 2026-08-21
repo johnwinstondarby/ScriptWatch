@@ -6,7 +6,7 @@ It has three layers:
 
 1. `ScriptWatchHeartbeat.jsxinc` publishes small job-state heartbeats from ExtendScript.
 2. `scriptwatch.py` collects heartbeat state plus Windows process telemetry and writes a CSV.
-3. `scriptwatch_web.py` presents the same collector data in a local browser dashboard.
+3. `scriptwatch_web.py` presents the collector data in a local browser dashboard and adds host-level memory/commit telemetry for visualization.
 
 No ScriptUI scraping is used. The observer can continue collecting process telemetry even when a job has no heartbeat.
 
@@ -59,13 +59,14 @@ The three-column dashboard is organized as:
 
 ### Runtime health
 
-- CPU
-- private memory and peak private memory
-- private-memory slope
-- working set
+- active circular dials for InDesign CPU, system physical-memory use, and system commit charge
+- sample-driven outer tracers that move only when a fresh telemetry sample arrives
+- private memory, peak private memory, private delta since dashboard attach, and qualified private-memory slope
+- a data-driven number-in-box counter bank for available RAM, commit headroom, working set, process threads/handles, and system process/thread/handle counts
 - backend-local pagefile counter
-- threads and handles
 - PID, process uptime, and UI-pump state
+
+On Windows, the host memory/commit dials use `GetPerformanceInfo` from `psapi.dll`. Physical RAM and system commit therefore have real denominators. The host probe also exposes system process, thread, handle, cache, and kernel-pool counters for future counter-bank expansion. On non-Windows systems with `psutil`, physical RAM remains available while Windows-specific commit counters are shown as unavailable rather than mapped to a different concept.
 
 ### Trends & alerts
 
@@ -79,7 +80,9 @@ The three-column dashboard is organized as:
 
 The dashboard uses a dark operations-console visual language inspired by classic infrastructure monitoring tools without reproducing a specific product interface.
 
-Every derived value in `/api/status` comes from `Monitor.snapshot()` in the collector, so the dashboard and the console cannot disagree about the same run. The payload carries `memoryCollecting`, `throughputCollecting`, `coverageSeconds`, and `coverageRequiredSeconds` so panels can render a collecting state rather than plotting a warm-up artifact as a trend.
+Process/job derived values in `/api/status` come from `Monitor.snapshot()` in the collector, so the dashboard and the console do not re-derive the same run state. Host-level memory and commit counters are an independent dashboard enrichment sampled beside that state. The payload carries `memoryCollecting`, `throughputCollecting`, `coverageSeconds`, and `coverageRequiredSeconds` so panels can render a collecting state rather than plotting a warm-up artifact as a trend.
+
+The circular activity tracer is sample-driven rather than decorative: it advances only when `latest.timestamp` changes. If the sampler stalls, the tracer stops. Number-in-box counters can briefly flash their border when a fresh sample changes the value. Reduced-motion preferences disable those animations.
 
 The dashboard binds to loopback. Binding elsewhere with `--host` publishes job names, DocStats paths, and process telemetry to anyone who can reach the port, and prints a warning saying so.
 
