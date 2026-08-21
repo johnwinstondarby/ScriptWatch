@@ -57,7 +57,7 @@
 
         <div class="job-detail hero-grid">
           <div class="gauge-card">
-            <div id="progress-gauge" class="ring-gauge">
+            <div id="progress-gauge" class="ring-gauge activity-ring">
               <div class="ring-center"><strong id="progress-percent">--</strong><span>complete</span></div>
             </div>
             <div class="gauge-label">Target progress</div>
@@ -90,31 +90,59 @@
       <section class="column-panel">
         <div class="section-heading">
           <span>02</span>
-          <div><h2>Runtime health</h2><p>Windows process state from outside InDesign</p></div>
+          <div><h2>Runtime health</h2><p>Process and host memory state from outside InDesign</p></div>
         </div>
 
-        <div class="runtime-hero">
-          <div class="gauge-card small">
-            <div id="cpu-gauge" class="ring-gauge small-ring"><div class="ring-center"><strong id="cpu-value">--</strong><span>CPU</span></div></div>
+        <div class="dial-bank">
+          <div class="dial-card">
+            <div id="cpu-gauge" class="ring-gauge instrument-ring activity-ring dial-green">
+              <div class="ring-center"><strong id="cpu-value">--</strong><span>CPU</span></div>
+            </div>
+            <div class="dial-label">InDesign CPU</div>
+            <div class="dial-detail" id="cpu-detail">process load</div>
           </div>
-          <div class="memory-instrument">
-            <span>Private memory</span>
-            <div class="memory-reading"><strong id="private-value">--</strong><small>MB</small></div>
-            <div class="memory-sub"><span id="private-peak">peak --</span><b id="memory-slope">collecting…</b></div>
+          <div class="dial-card">
+            <div id="ram-gauge" class="ring-gauge instrument-ring activity-ring dial-cyan">
+              <div class="ring-center"><strong id="ram-value">--</strong><span>RAM</span></div>
+            </div>
+            <div class="dial-label">System RAM</div>
+            <div class="dial-detail" id="ram-detail">used / total</div>
+          </div>
+          <div class="dial-card">
+            <div id="commit-gauge" class="ring-gauge instrument-ring activity-ring dial-blue">
+              <div class="ring-center"><strong id="commit-value">--</strong><span>COMMIT</span></div>
+            </div>
+            <div class="dial-label">System commit</div>
+            <div class="dial-detail" id="commit-detail">charge / limit</div>
+          </div>
+        </div>
+
+        <div class="memory-instrument wide-memory">
+          <div class="memory-main-row">
+            <div>
+              <span>InDesign private memory</span>
+              <div class="memory-reading"><strong id="private-value">--</strong><small>MB</small></div>
+            </div>
+            <div class="memory-delta-box">
+              <span>Since attach</span>
+              <strong id="private-delta">--</strong>
+            </div>
+          </div>
+          <div class="memory-sub-grid">
+            <div><span>Peak</span><b id="private-peak">--</b></div>
+            <div><span>Slope</span><b id="memory-slope">trend pending</b></div>
           </div>
         </div>
 
         <div id="memory-spark-card" class="spark-card">
           <div class="spark-head"><span>Private memory history</span><strong id="memory-coverage">collecting…</strong></div>
           <svg id="memory-spark" class="sparkline" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
-          <div class="spark-foot"><span id="memory-qualification">raw samples · trend not yet qualified</span><strong id="memory-slope-foot">collecting…</strong></div>
+          <div class="spark-foot"><span id="memory-qualification">raw samples · trend not yet qualified</span><strong id="memory-slope-foot">pending</strong></div>
         </div>
 
-        <div class="metric-grid two runtime-metrics">
-          <div class="metric-card"><span>Working set</span><strong id="working-value">--</strong><small>MB</small></div>
-          <div class="metric-card"><span>Peak private</span><strong id="peak-private-value">--</strong><small>MB</small></div>
-          <div class="metric-card"><span>Threads</span><strong id="threads-value">--</strong></div>
-          <div class="metric-card"><span>Handles</span><strong id="handles-value">--</strong></div>
+        <div class="counter-section">
+          <div class="counter-section-head"><span>Live counter bank</span><b id="counter-bank-state">sample-driven</b></div>
+          <div id="counter-bank" class="counter-bank"></div>
         </div>
 
         <div class="instrument-card runtime-detail">
@@ -125,7 +153,7 @@
             <div class="signal-row"><span>UI pump</span><b id="responding-value">--</b></div>
             <div class="signal-row"><span>Pagefile</span><b id="pagefile-value">--</b></div>
           </div>
-          <div class="detail-note">Pagefile is backend-local and informational only.</div>
+          <div class="detail-note">Pagefile is backend-local and informational only. System RAM and commit dials use host counters with real denominators.</div>
         </div>
       </section>
 
