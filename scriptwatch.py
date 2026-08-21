@@ -3,40 +3,14 @@
 ScriptWatch - ExtendScript Runtime Monitor
 ==========================================
 
-An out-of-process observer for long-running InDesign ExtendScript jobs
-(DocStats, StyleFix, HeaderFix, NormalFix, TableFix, and anything after them).
+Out-of-process observer for long-running Adobe InDesign ExtendScript jobs.
 
-It combines two independent signals:
+ScriptWatch combines two independent acquisition paths:
+  1. Harness/heartbeat job state published by the script itself.
+  2. Agentless process and host telemetry sampled outside InDesign.
 
-  1. Job state, published by the script itself as a small JSON heartbeat file
-     (see ScriptWatchHeartbeat.jsxinc).
-  2. Windows process telemetry for InDesign.exe, sampled from outside.
-
-Neither signal depends on the other. If the heartbeat stops, process telemetry
-keeps recording. If the script never emits a heartbeat, ScriptWatch still runs
-in process-only mode.
-
-Usage
------
-    python scriptwatch.py                              # auto-attach to InDesign
-    python scriptwatch.py --dir "D:\\...\\DocStats"
-    python scriptwatch.py --pid 12345 --interval 5
-    python scriptwatch.py --once                       # one snapshot, no loop
-    python scriptwatch.py --report ScriptWatch_NormalFix.csv
-
-Runtime output convention: heartbeats and sample logs live in the DocStats
-directory (see DOCSTATS_DIR), not %TEMP%. Both --dir and --heartbeat/--csv
-override it.
-
-Every sample is appended to a CSV so the memory question can be answered
-empirically after the fact instead of inferred from throughput.
-
-Memory fields: private_mb is the trend and alert metric on both backends.
-working_mb and pagefile_mb are informational, and pagefile_mb is not the same
-counter on both backends. See PsutilProbe and PowerShellProbe.
-
-Backends: psutil if installed, otherwise PowerShell (Get-Process). No admin
-rights required for either.
+Either path can operate without the other. Every sample is appended to CSV so
+post-run analysis uses the same evidence shown live in the console/dashboard.
 """
 
 from __future__ import annotations
@@ -57,20 +31,16 @@ from datetime import datetime, timezone
 # --------------------------------------------------------------------------
 
 DEFAULT_PROCESS = "InDesign"
-DEFAULT_INTERVAL = 5.0          # seconds between samples
-DEFAULT_STALL = 180             # heartbeat age (s) before status goes STALLED
-DEFAULT_TREND_WINDOW = 1800     # seconds of history used for trend fits
-DEFAULT_MEM_ALERT = 50.0        # MB/hour slope that trips a memory warning
-MIN_TREND_SPAN = 600.0          # seconds of coverage before any slope is reported
-MIN_TREND_SAMPLES = 8           # samples required alongside that coverage
-THROUGHPUT_TOLERANCE = 0.15     # +/- fraction treated as "stable"
+DEFAULT_INTERVAL = 5.0
+DEFAULT_STALL = 180
+DEFAULT_TREND_WINDOW = 1800
+DEFAULT_MEM_ALERT = 50.0
+MIN_TREND_SPAN = 600.0
+MIN_TREND_SAMPLES = 8
+THROUGHPUT_TOLERANCE = 0.15
 MB = 1024.0 * 1024.0
-
 IS_WINDOWS = os.name == "nt"
 
-# Suite convention: runtime output (heartbeats, lock files, sample logs) lives in
-# the DocStats directory, not %TEMP%. Override with --dir or SCRIPTWATCH_DIR.
-# If no candidate exists, fall back to the working directory.
 DOCSTATS_DIR = (r"D:\Recovery Community Dropbox\DARBY FAMILY"
                 r"\!!!New Business 2025\AI Ecosystem\DocStats")
 
@@ -93,7 +63,6 @@ except ImportError:  # pragma: no cover - environment dependent
 # --------------------------------------------------------------------------
 
 def hms(seconds):
-    """Format a duration as H:MM:SS. Returns '--:--:--' for unknown values."""
     if seconds is None or seconds < 0 or math.isinf(seconds) or math.isnan(seconds):
         return "--:--:--"
     seconds = int(seconds)
@@ -114,7 +83,6 @@ def slugify(text):
 
 
 def slope_per_hour(points):
-    """Least-squares slope of (timestamp_seconds, value) pairs, per hour."""
     n = len(points)
     if n < 3:
         return None
@@ -130,7 +98,6 @@ def slope_per_hour(points):
 
 
 def enable_ansi():
-    """Turn on VT processing so in-place redraw works in cmd.exe."""
     if not IS_WINDOWS:
         return True
     try:
@@ -145,6 +112,24 @@ def enable_ansi():
         return False
 
 
+def _round_or_blank(value, digits=1):
+    if value is None:
+        return ""
+    try:
+        return round(float(value), digits)
+    except (TypeError, ValueError):
+        return ""
+
+
+def _int_or_blank(value):
+    if value is None:
+        return ""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return ""
+
+
 # --------------------------------------------------------------------------
 # Heartbeat reader
 # --------------------------------------------------------------------------
@@ -153,24 +138,7 @@ TERMINAL_STATUSES = ("DONE", "COMPLETE", "FINISHED", "ABORTED", "ERROR", "FAILED
 
 
 def discover_heartbeat(directory, stale_after=DEFAULT_STALL):
-    """
-    Newest heartbeat in `directory` that could plausibly belong to a live job.
-
-    Finished heartbeats outlive their jobs: finish() writes a terminal status
-    and releases the lock, but the JSON stays in the runtime directory. With
-    several tools writing slugged files, the newest file by mtime is often a
-    completed run from yesterday, and attaching to it would report COMPLETE with
-    a full progress ring for a job that is not running at all.
-
-    A candidate is therefore skipped when its status is terminal AND it has not
-    been written within `stale_after`. A terminal status written seconds ago is
-    kept: that is a job finishing while the console watches, which is worth
-    showing. An explicit --heartbeat always wins, because naming a file is an
-    instruction rather than a guess.
-
-    Returns (path, skipped) where `skipped` lists (path, status) for candidates
-    that were passed over, so the caller can say why nothing was found.
-    """
+    """Return (newest plausible heartbeat, skipped stale terminal candidates)."""
     now_ts = time.time()
     best, best_mtime, skipped = None, -1.0, []
     try:
@@ -199,22 +167,19 @@ def discover_heartbeat(directory, stale_after=DEFAULT_STALL):
 
 
 class Heartbeat(object):
-    """
-    Reads the JSON heartbeat written by the ExtendScript job.
+    """Read the swap-written JSON heartbeat while retaining the last good parse."""
 
-    Tolerates partial reads: the writer swaps a temp file into place, but if a
-    read lands mid-swap the last good sample is retained and the file is simply
-    re-read on the next cycle. A parse failure is never treated as a stall.
-    """
-
-    FIELDS = ("job", "target", "total", "pass", "fail", "elapsedSeconds",
-              "averageTargetMs", "lastCheckpoint", "status", "pid")
+    FIELDS = (
+        "job", "target", "total", "pass", "fail", "elapsedSeconds",
+        "averageTargetMs", "lastCheckpoint", "status", "pid", "tool",
+        "toolVersion", "harnessVersion", "mode", "metrics", "schemaVersion",
+    )
 
     def __init__(self, path):
         self.path = path
         self.data = {}
         self.mtime = None
-        self.last_good = None      # wall-clock time of last successful parse
+        self.last_good = None
         self.parse_errors = 0
         self.ever_seen = False
 
@@ -226,7 +191,7 @@ class Heartbeat(object):
         except OSError:
             return
         if self.mtime is not None and st.st_mtime == self.mtime and self.data:
-            return  # unchanged since last read
+            return
         try:
             with open(self.path, "r", encoding="utf-8-sig") as fh:
                 parsed = json.load(fh)
@@ -240,7 +205,6 @@ class Heartbeat(object):
         self.last_good = st.st_mtime
         self.ever_seen = True
 
-    # -- convenience accessors ---------------------------------------------
     def get(self, key, default=None):
         value = self.data.get(key, default)
         return default if value is None else value
@@ -253,12 +217,217 @@ class Heartbeat(object):
 
 
 # --------------------------------------------------------------------------
-# Process telemetry
+# Host telemetry
+# --------------------------------------------------------------------------
+
+SYSTEM_COUNTER_KEYS = (
+    "physical_total_mb", "physical_available_mb", "physical_used_mb",
+    "physical_used_pct", "commit_mb", "commit_limit_mb", "commit_pct",
+    "commit_peak_mb", "system_cache_mb", "kernel_paged_mb",
+    "kernel_nonpaged_mb", "process_count", "thread_count", "handle_count",
+)
+
+
+def empty_system_sample():
+    return dict((key, None) for key in SYSTEM_COUNTER_KEYS)
+
+
+def system_memory_sample():
+    """
+    Host physical-memory and commit counters.
+
+    Windows uses GetPerformanceInfo so physical RAM and commit charge have real
+    denominators. Non-Windows uses psutil physical-memory fields when available;
+    Windows-specific commit/cache/kernel counters remain unavailable there.
+    """
+    empty = empty_system_sample()
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class PERFORMANCE_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("CommitTotal", ctypes.c_size_t),
+                    ("CommitLimit", ctypes.c_size_t),
+                    ("CommitPeak", ctypes.c_size_t),
+                    ("PhysicalTotal", ctypes.c_size_t),
+                    ("PhysicalAvailable", ctypes.c_size_t),
+                    ("SystemCache", ctypes.c_size_t),
+                    ("KernelTotal", ctypes.c_size_t),
+                    ("KernelPaged", ctypes.c_size_t),
+                    ("KernelNonpaged", ctypes.c_size_t),
+                    ("PageSize", ctypes.c_size_t),
+                    ("HandleCount", wintypes.DWORD),
+                    ("ProcessCount", wintypes.DWORD),
+                    ("ThreadCount", wintypes.DWORD),
+                ]
+
+            info = PERFORMANCE_INFORMATION()
+            info.cb = ctypes.sizeof(info)
+            fn = ctypes.windll.psapi.GetPerformanceInfo
+            fn.argtypes = [ctypes.POINTER(PERFORMANCE_INFORMATION), wintypes.DWORD]
+            fn.restype = wintypes.BOOL
+            if not fn(ctypes.byref(info), info.cb):
+                return empty
+
+            page = float(info.PageSize)
+
+            def pages_mb(value):
+                return float(value) * page / MB
+
+            total = pages_mb(info.PhysicalTotal)
+            available = pages_mb(info.PhysicalAvailable)
+            used = max(0.0, total - available)
+            commit = pages_mb(info.CommitTotal)
+            commit_limit = pages_mb(info.CommitLimit)
+            return {
+                "physical_total_mb": total,
+                "physical_available_mb": available,
+                "physical_used_mb": used,
+                "physical_used_pct": (100.0 * used / total) if total else None,
+                "commit_mb": commit,
+                "commit_limit_mb": commit_limit,
+                "commit_pct": (100.0 * commit / commit_limit) if commit_limit else None,
+                "commit_peak_mb": pages_mb(info.CommitPeak),
+                "system_cache_mb": pages_mb(info.SystemCache),
+                "kernel_paged_mb": pages_mb(info.KernelPaged),
+                "kernel_nonpaged_mb": pages_mb(info.KernelNonpaged),
+                "process_count": int(info.ProcessCount),
+                "thread_count": int(info.ThreadCount),
+                "handle_count": int(info.HandleCount),
+            }
+        except Exception:
+            return empty
+
+    if psutil is not None:
+        try:
+            vm = psutil.virtual_memory()
+            total = float(vm.total) / MB
+            available = float(vm.available) / MB
+            used = max(0.0, total - available)
+            result = dict(empty)
+            result.update({
+                "physical_total_mb": total,
+                "physical_available_mb": available,
+                "physical_used_mb": used,
+                "physical_used_pct": (100.0 * used / total) if total else None,
+                "process_count": len(psutil.pids()),
+            })
+            return result
+        except Exception:
+            pass
+    return empty
+
+
+PROCESS_EXTRA_KEYS = (
+    "io_read_bytes", "io_write_bytes", "io_other_bytes",
+    "io_read_ops", "io_write_ops", "io_other_ops", "page_faults",
+    "gdi_objects", "user_objects",
+)
+
+
+def empty_process_extras():
+    return dict((key, None) for key in PROCESS_EXTRA_KEYS)
+
+
+def windows_process_extras(pid):
+    """
+    Windows process I/O, page-fault, GDI, and USER counters.
+
+    These counters are collected through Win32 APIs independently of psutil or
+    the PowerShell fallback so both process backends publish the same semantics.
+    Unavailable fields remain None rather than being mapped to another counter.
+    """
+    result = empty_process_extras()
+    if not IS_WINDOWS:
+        return result
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_INFORMATION = 0x0400
+        PROCESS_VM_READ = 0x0010
+        GR_GDIOBJECTS = 0
+        GR_USEROBJECTS = 1
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+                ("PrivateUsage", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.GetProcessIoCounters.argtypes = [wintypes.HANDLE, ctypes.POINTER(IO_COUNTERS)]
+        kernel32.GetProcessIoCounters.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, int(pid))
+        if not handle:
+            return result
+        try:
+            io_info = IO_COUNTERS()
+            if kernel32.GetProcessIoCounters(handle, ctypes.byref(io_info)):
+                result.update({
+                    "io_read_bytes": int(io_info.ReadTransferCount),
+                    "io_write_bytes": int(io_info.WriteTransferCount),
+                    "io_other_bytes": int(io_info.OtherTransferCount),
+                    "io_read_ops": int(io_info.ReadOperationCount),
+                    "io_write_ops": int(io_info.WriteOperationCount),
+                    "io_other_ops": int(io_info.OtherOperationCount),
+                })
+
+            pmc = PROCESS_MEMORY_COUNTERS_EX()
+            pmc.cb = ctypes.sizeof(pmc)
+            get_mem = ctypes.windll.psapi.GetProcessMemoryInfo
+            get_mem.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESS_MEMORY_COUNTERS_EX), wintypes.DWORD]
+            get_mem.restype = wintypes.BOOL
+            if get_mem(handle, ctypes.byref(pmc), pmc.cb):
+                result["page_faults"] = int(pmc.PageFaultCount)
+
+            try:
+                user32 = ctypes.windll.user32
+                user32.GetGuiResources.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+                user32.GetGuiResources.restype = wintypes.DWORD
+                result["gdi_objects"] = int(user32.GetGuiResources(handle, GR_GDIOBJECTS))
+                result["user_objects"] = int(user32.GetGuiResources(handle, GR_USEROBJECTS))
+            except Exception:
+                pass
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+    return result
+
+
+# --------------------------------------------------------------------------
+# Process telemetry backends
 # --------------------------------------------------------------------------
 
 class Probe(object):
-    """Base class. sample() returns a dict or None if the process is gone."""
-
     def __init__(self, pid):
         self.pid = pid
         self.start_time = None
@@ -279,23 +448,15 @@ class PsutilProbe(Probe):
         self.proc = psutil.Process(pid)
         self.cores = psutil.cpu_count() or 1
         self.start_time = self.proc.create_time()
-        self.proc.cpu_percent(None)  # prime the CPU delta
+        self.proc.cpu_percent(None)
 
     def sample(self):
-        """
-        private_mb  = PROCESS_MEMORY_COUNTERS_EX.PrivateUsage, the Private Bytes
-                      counter. This is the trend and alert metric.
-        working_mb  = WorkingSetSize. Informational only: it falls when the OS
-                      trims the working set, with nothing actually released.
-        pagefile_mb = PagefileUsage. Informational only, and NOT the same counter
-                      the PowerShell backend reports (see PowerShellProbe).
-        """
         try:
             with self.proc.oneshot():
                 mi = self.proc.memory_info()
                 private = getattr(mi, "private", None)
                 pagefile = getattr(mi, "pagefile", None)
-                return {
+                out = {
                     "cpu": self.proc.cpu_percent(None) / float(self.cores),
                     "working_mb": mi.rss / MB,
                     "private_mb": (private if private is not None else mi.vms) / MB,
@@ -304,24 +465,29 @@ class PsutilProbe(Probe):
                     "handles": (self.proc.num_handles()
                                 if hasattr(self.proc, "num_handles") else None),
                 }
+            if not IS_WINDOWS:
+                try:
+                    io = self.proc.io_counters()
+                    out.update({
+                        "io_read_bytes": getattr(io, "read_bytes", None),
+                        "io_write_bytes": getattr(io, "write_bytes", None),
+                        "io_other_bytes": getattr(io, "other_bytes", None),
+                        "io_read_ops": getattr(io, "read_count", None),
+                        "io_write_ops": getattr(io, "write_count", None),
+                        "io_other_ops": getattr(io, "other_count", None),
+                        "page_faults": getattr(mi, "num_page_faults", None),
+                        "gdi_objects": None,
+                        "user_objects": None,
+                    })
+                except Exception:
+                    out.update(empty_process_extras())
+            return out
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return None
 
 
 class PowerShellProbe(Probe):
-    """
-    Fallback for machines where psutil is not installed.
-
-    private_mb  = PrivateMemorySize64, which Microsoft defines as memory
-                  allocated to the process that cannot be shared with other
-                  processes, equivalent to the Private Bytes counter. Same
-                  meaning as the psutil backend's private_mb, so trends and
-                  alerts are comparable across backends.
-    pagefile_mb = PagedMemorySize64, which Microsoft describes as memory that
-                  can be written to the paging file. This is a different counter
-                  from the psutil backend's pagefile_mb, so treat the column as
-                  informational and backend-local. Never trend or alert on it.
-    """
+    """Get-Process fallback when psutil is unavailable."""
 
     PS = ("$ErrorActionPreference='Stop';$p=Get-Process -Id {pid};"
           "[pscustomobject]@{{ws=$p.WorkingSet64;priv=$p.PrivateMemorySize64;"
@@ -372,8 +538,20 @@ class PowerShellProbe(Probe):
         }
 
 
+def enrich_process_sample(proc, pid):
+    if proc is None:
+        return None
+    extras = windows_process_extras(pid) if IS_WINDOWS else empty_process_extras()
+    if not IS_WINDOWS and isinstance(proc, dict):
+        for key in PROCESS_EXTRA_KEYS:
+            if key in proc:
+                extras[key] = proc[key]
+    out = dict(proc)
+    out.update(extras)
+    return out
+
+
 def find_processes(name_fragment):
-    """All matching processes as (pid, working_set_bytes), largest first."""
     fragment = name_fragment.lower()
     found = []
     if psutil is not None:
@@ -402,15 +580,6 @@ def find_processes(name_fragment):
 
 
 def pid_holding(path, candidates):
-    """
-    Best-effort: which candidate PID holds `path` open?
-
-    The ExtendScript side cannot read its own PID, so instead it keeps a small
-    lock file open for the life of the job. Matching that open handle to a
-    process identifies the right InDesign instance when several are running.
-    Returns None if the answer cannot be determined; the caller then falls back
-    to working set and warns.
-    """
     if psutil is None or not path:
         return None
     try:
@@ -428,20 +597,13 @@ def pid_holding(path, candidates):
 
 
 def is_responding(pid):
-    """
-    Windows-only UI responsiveness check.
-
-    Note: an InDesign running a modal ExtendScript job normally reports NOT
-    RESPONDING because the script owns the main thread and the message pump is
-    not being serviced. That is expected, not a fault signal. Treat it as
-    information about the UI thread, not about job health.
-    """
+    """Windows UI-pump status; blocked is expected during modal ExtendScript."""
     if not IS_WINDOWS:
         return None
     try:
         out = subprocess.run(
-            ["tasklist", "/FI", "PID eq %d" % pid, "/FI", "STATUS eq NOT RESPONDING",
-             "/NH", "/FO", "CSV"],
+            ["tasklist", "/FI", "PID eq %d" % pid,
+             "/FI", "STATUS eq NOT RESPONDING", "/NH", "/FO", "CSV"],
             capture_output=True, text=True, timeout=15)
         return str(pid) not in out.stdout
     except Exception:
@@ -452,10 +614,20 @@ def is_responding(pid):
 # Monitor
 # --------------------------------------------------------------------------
 
-CSV_COLUMNS = ["iso", "epoch", "pid", "cpu_pct", "working_mb", "private_mb",
-               "pagefile_mb", "threads", "handles", "responding", "job", "target",
-               "total", "passed", "failed", "checkpoint", "hb_age_s",
-               "rate_per_min", "eta_s", "watch_bytes", "heartbeat_note"]
+CSV_COLUMNS = [
+    "iso", "epoch", "pid", "cpu_pct", "working_mb", "private_mb", "pagefile_mb",
+    "threads", "handles", "page_faults", "gdi_objects", "user_objects",
+    "io_read_bytes", "io_write_bytes", "io_other_bytes",
+    "io_read_ops", "io_write_ops", "io_other_ops", "responding",
+    "system_physical_total_mb", "system_physical_available_mb", "system_physical_used_mb",
+    "system_physical_used_pct", "system_commit_mb", "system_commit_limit_mb",
+    "system_commit_pct", "system_commit_peak_mb", "system_cache_mb",
+    "system_kernel_paged_mb", "system_kernel_nonpaged_mb", "system_processes",
+    "system_threads", "system_handles",
+    "job", "tool", "tool_version", "harness_version", "heartbeat_schema", "job_mode",
+    "target", "total", "passed", "failed", "checkpoint", "hb_age_s",
+    "rate_per_min", "eta_s", "watch_bytes", "heartbeat_note", "metrics_json",
+]
 
 
 class Monitor(object):
@@ -467,13 +639,12 @@ class Monitor(object):
         if not hb_path:
             hb_path, skipped = discover_heartbeat(self.dir, args.stall)
             if not hb_path and skipped:
-                # Say why discovery came up empty. Silence here reads as "no
-                # heartbeat was ever written", which is a different problem.
                 self.warnings.append(
                     "skipped %d finished heartbeat%s in %s (%s); pass --heartbeat to "
-                    "attach anyway" % (len(skipped), "" if len(skipped) == 1 else "s",
-                                       self.dir,
-                                       ", ".join(sorted(set(s for _, s in skipped)))))
+                    "attach anyway" % (
+                        len(skipped), "" if len(skipped) == 1 else "s", self.dir,
+                        ", ".join(sorted(set(status for _, status in skipped))),
+                    ))
         self.hb = Heartbeat(hb_path)
         self.hb.poll()
         self.pid = args.pid or self.hb.data.get("pid") or self._choose_pid()
@@ -481,15 +652,16 @@ class Monitor(object):
             raise SystemExit("No process matching '%s' found. Pass --pid, or start "
                              "InDesign first." % args.process)
         self.probe = self._make_probe(int(self.pid))
-        self.mem_hist = deque()      # (ts, private_mb)
-        self.tgt_hist = deque()      # (ts, target)
+        self.mem_hist = deque()
+        self.tgt_hist = deque()
         self.started = now()
         self.samples = 0
         self.peak_private = 0.0
         self.csv_path = args.csv or os.path.join(
-            self.dir, "ScriptWatch_%s_%s.csv"
-            % (slugify(self.hb.get("job") or args.process),
-               datetime.now().strftime("%Y%m%d-%H%M%S")))
+            self.dir, "ScriptWatch_%s_%s.csv" % (
+                slugify(self.hb.get("job") or args.process),
+                datetime.now().strftime("%Y%m%d-%H%M%S"),
+            ))
         self._init_csv()
 
     def _choose_pid(self):
@@ -528,30 +700,19 @@ class Monitor(object):
     # -- derived metrics ---------------------------------------------------
     def _trend_window(self, history):
         cutoff = now() - self.args.trend_window
-        return [p for p in history if p[0] >= cutoff]
+        return [point for point in history if point[0] >= cutoff]
 
     def coverage(self):
-        """Seconds of history currently inside the trend window."""
         pts = self._trend_window(self.mem_hist)
         return (pts[-1][0] - pts[0][0]) if len(pts) >= 2 else 0.0
 
     def memory_trend(self):
-        """
-        MB/hour slope of private bytes, or None while still collecting.
-
-        A slope is withheld until the window holds MIN_TREND_SPAN of coverage.
-        Extrapolating an hourly rate from the first minute of a run reports
-        process warm-up as a leak: InDesign allocates hard at startup, so a
-        short window yields a huge positive slope that says nothing about
-        retention across targets.
-        """
         pts = self._trend_window(self.mem_hist)
         if len(pts) < MIN_TREND_SAMPLES or (pts[-1][0] - pts[0][0]) < MIN_TREND_SPAN:
             return None
         return slope_per_hour(pts)
 
     def rate_per_min(self):
-        """Targets per minute over the trailing trend window."""
         pts = self._trend_window(self.tgt_hist)
         if len(pts) < 2:
             return None
@@ -562,7 +723,6 @@ class Monitor(object):
         return dn / (dt / 60.0)
 
     def throughput_trend(self):
-        """Compare the recent half of the window against the earlier half."""
         pts = self._trend_window(self.tgt_hist)
         if len(pts) < 6 or (pts[-1][0] - pts[0][0]) < MIN_TREND_SPAN:
             return None, None
@@ -617,20 +777,33 @@ class Monitor(object):
             out.append("%d heartbeat parse failures" % self.hb.parse_errors)
         return self.warnings + out
 
+    def _metrics_json(self):
+        metrics = self.hb.get("metrics", [])
+        if not isinstance(metrics, list):
+            return "[]"
+        try:
+            return json.dumps(metrics, separators=(",", ":"), ensure_ascii=False)
+        except Exception:
+            return "[]"
+
     # -- main loop ---------------------------------------------------------
     def tick(self):
         self.hb.poll()
         proc = self.probe.sample()
         if proc is None:
             return None
+        proc = enrich_process_sample(proc, int(self.pid))
+        system = system_memory_sample()
         stamp = now()
         self.samples += 1
         self.peak_private = max(self.peak_private, proc["private_mb"])
         self.mem_hist.append((stamp, proc["private_mb"]))
+
         target = self.hb.get("target")
         if isinstance(target, (int, float)):
             if not self.tgt_hist or self.tgt_hist[-1][1] != target:
                 self.tgt_hist.append((stamp, target))
+
         cutoff = stamp - max(self.args.trend_window * 2, 3600)
         while self.mem_hist and self.mem_hist[0][0] < cutoff:
             self.mem_hist.popleft()
@@ -644,26 +817,55 @@ class Monitor(object):
         if self.args.watch and os.path.exists(self.args.watch):
             watch_bytes = os.path.getsize(self.args.watch)
 
-        self.csv.writerow([
-            iso(stamp), round(stamp, 2), self.pid, round(proc["cpu"], 2),
-            round(proc["working_mb"], 1), round(proc["private_mb"], 1),
-            round(proc["pagefile_mb"], 1), proc["threads"], proc["handles"],
+        row = [
+            iso(stamp), round(stamp, 2), self.pid,
+            _round_or_blank(proc.get("cpu"), 2),
+            _round_or_blank(proc.get("working_mb"), 1),
+            _round_or_blank(proc.get("private_mb"), 1),
+            _round_or_blank(proc.get("pagefile_mb"), 1),
+            _int_or_blank(proc.get("threads")), _int_or_blank(proc.get("handles")),
+            _int_or_blank(proc.get("page_faults")), _int_or_blank(proc.get("gdi_objects")),
+            _int_or_blank(proc.get("user_objects")), _int_or_blank(proc.get("io_read_bytes")),
+            _int_or_blank(proc.get("io_write_bytes")), _int_or_blank(proc.get("io_other_bytes")),
+            _int_or_blank(proc.get("io_read_ops")), _int_or_blank(proc.get("io_write_ops")),
+            _int_or_blank(proc.get("io_other_ops")),
             "" if responding is None else int(responding),
-            self.hb.get("job", ""), self.hb.get("target", ""), self.hb.get("total", ""),
-            self.hb.get("pass", ""), self.hb.get("fail", ""), self.hb.get("lastCheckpoint", ""),
+            _round_or_blank(system.get("physical_total_mb"), 1),
+            _round_or_blank(system.get("physical_available_mb"), 1),
+            _round_or_blank(system.get("physical_used_mb"), 1),
+            _round_or_blank(system.get("physical_used_pct"), 2),
+            _round_or_blank(system.get("commit_mb"), 1),
+            _round_or_blank(system.get("commit_limit_mb"), 1),
+            _round_or_blank(system.get("commit_pct"), 2),
+            _round_or_blank(system.get("commit_peak_mb"), 1),
+            _round_or_blank(system.get("system_cache_mb"), 1),
+            _round_or_blank(system.get("kernel_paged_mb"), 1),
+            _round_or_blank(system.get("kernel_nonpaged_mb"), 1),
+            _int_or_blank(system.get("process_count")), _int_or_blank(system.get("thread_count")),
+            _int_or_blank(system.get("handle_count")),
+            self.hb.get("job", ""), self.hb.get("tool", ""),
+            self.hb.get("toolVersion", ""), self.hb.get("harnessVersion", ""),
+            self.hb.get("schemaVersion", ""), self.hb.get("mode", ""),
+            self.hb.get("target", ""), self.hb.get("total", ""),
+            self.hb.get("pass", ""), self.hb.get("fail", ""),
+            self.hb.get("lastCheckpoint", ""),
             "" if self.hb.age is None else round(self.hb.age, 1),
             "" if rate is None else round(rate, 3),
             "" if eta is None else round(eta, 0),
             "" if watch_bytes is None else watch_bytes,
-            self.hb.get("note", ""),
-        ])
+            self.hb.get("note", ""), self._metrics_json(),
+        ]
+        self.csv.writerow(row)
         self.csv_file.flush()
-        return {"proc": proc, "rate": rate, "eta": eta, "responding": responding,
-                "watch_bytes": watch_bytes, "ts": stamp}
+        return {
+            "proc": proc, "system": system, "rate": rate, "eta": eta,
+            "responding": responding, "watch_bytes": watch_bytes, "ts": stamp,
+        }
 
     # -- rendering ---------------------------------------------------------
     def render(self, snap):
         proc = snap["proc"]
+        system = snap["system"]
         mem_slope = self.memory_trend()
         trend, ratio = self.throughput_trend()
         state, note = self.status()
@@ -674,64 +876,73 @@ class Monitor(object):
         if isinstance(target, (int, float)) and isinstance(total, (int, float)) and total:
             pct = "  %5.1f%%" % (100.0 * target / total)
 
-        L = []
-        L.append(job)
-        L.append("=" * max(28, min(64, len(job))))
-        L.append("Target        %s / %s%s" % (target if target is not None else "?",
-                                              total if total is not None else "?", pct))
-        L.append("Pass / Fail   %s / %s" % (self.hb.get("pass", "?"), self.hb.get("fail", "?")))
+        lines = [job, "=" * max(28, min(64, len(job)))]
+        lines.append("Target        %s / %s%s" % (
+            target if target is not None else "?", total if total is not None else "?", pct))
+        lines.append("Pass / Fail   %s / %s" % (self.hb.get("pass", "?"), self.hb.get("fail", "?")))
         elapsed = self.hb.get("elapsedSeconds")
-        L.append("Elapsed       %s   (monitor %s)"
-                 % (hms(elapsed) if elapsed else "--:--:--", hms(now() - self.started)))
-        L.append("Rate          %s targets/min"
-                 % ("%.2f" % snap["rate"] if snap["rate"] else "--"))
+        lines.append("Elapsed       %s   (monitor %s)" % (
+            hms(elapsed) if elapsed else "--:--:--", hms(now() - self.started)))
+        lines.append("Rate          %s targets/min" % ("%.2f" % snap["rate"] if snap["rate"] else "--"))
         avg = self.hb.get("averageTargetMs")
         if avg:
-            L.append("Avg target    %.1f s" % (float(avg) / 1000.0))
-        L.append("ETA           %s%s" % (hms(snap["eta"]),
-                 "   (finish ~%s)" % datetime.fromtimestamp(now() + snap["eta"]).strftime("%H:%M")
-                 if snap["eta"] else ""))
-        L.append("")
-        L.append("InDesign  pid %s   up %s" % (self.pid, hms(self.probe.uptime)))
-        L.append("CPU           %5.1f %%" % proc["cpu"])
-        L.append("Private MB    %8.1f   (peak %.1f)" % (proc["private_mb"], self.peak_private))
-        L.append("Working MB    %8.1f" % proc["working_mb"])
-        L.append("Pagefile MB   %8.1f" % proc["pagefile_mb"])
-        L.append("Threads       %8s" % proc["threads"])
-        L.append("Handles       %8s" % (proc["handles"] if proc["handles"] is not None else "n/a"))
+            lines.append("Avg target    %.1f s" % (float(avg) / 1000.0))
+        lines.append("ETA           %s%s" % (
+            hms(snap["eta"]),
+            "   (finish ~%s)" % datetime.fromtimestamp(now() + snap["eta"]).strftime("%H:%M")
+            if snap["eta"] else ""))
+
+        if self.hb.get("harnessVersion"):
+            lines.append("Harness       %s%s%s" % (
+                self.hb.get("harnessVersion"),
+                "   tool " + str(self.hb.get("tool")) if self.hb.get("tool") else "",
+                " " + str(self.hb.get("toolVersion")) if self.hb.get("toolVersion") else ""))
+
+        lines.append("")
+        lines.append("InDesign  pid %s   up %s" % (self.pid, hms(self.probe.uptime)))
+        lines.append("CPU           %5.1f %%" % proc["cpu"])
+        lines.append("Private MB    %8.1f   (peak %.1f)" % (proc["private_mb"], self.peak_private))
+        lines.append("Working MB    %8.1f" % proc["working_mb"])
+        lines.append("Pagefile MB   %8.1f" % proc["pagefile_mb"])
+        lines.append("Threads       %8s" % proc["threads"])
+        lines.append("Handles       %8s" % (proc["handles"] if proc["handles"] is not None else "n/a"))
+        if proc.get("gdi_objects") is not None:
+            lines.append("GDI / USER    %s / %s" % (proc.get("gdi_objects"), proc.get("user_objects")))
+        if proc.get("io_read_bytes") is not None:
+            lines.append("I/O read/write %.1f / %.1f MB" % (
+                proc.get("io_read_bytes") / MB, proc.get("io_write_bytes") / MB))
         if snap["responding"] is not None:
-            L.append("UI pump       %s"
-                     % ("responsive" if snap["responding"]
-                        else "blocked (expected during a modal script)"))
-        L.append("")
+            lines.append("UI pump       %s" % (
+                "responsive" if snap["responding"] else "blocked (expected during a modal script)"))
+
+        if system.get("physical_used_pct") is not None:
+            lines.append("Host RAM      %5.1f %% used" % system["physical_used_pct"])
+        if system.get("commit_pct") is not None:
+            lines.append("Host commit   %5.1f %%" % system["commit_pct"])
+
+        lines.append("")
         collecting = "collecting... %s of %s" % (hms(self.coverage()), hms(MIN_TREND_SPAN))
-        L.append("Memory trend       %s"
-                 % ("%+.1f MB/hour" % mem_slope if mem_slope is not None else collecting))
-        L.append("Throughput trend   %s" % (trend or collecting))
-        L.append("Heartbeat age      %s"
-                 % ("%d sec" % self.hb.age if self.hb.age is not None else "n/a"))
-        L.append("Last checkpoint    %s" % self.hb.get("lastCheckpoint", "n/a"))
+        lines.append("Memory trend       %s" % (
+            "%+.1f MB/hour" % mem_slope if mem_slope is not None else collecting))
+        lines.append("Throughput trend   %s" % (trend or collecting))
+        lines.append("Heartbeat age      %s" % (
+            "%d sec" % self.hb.age if self.hb.age is not None else "n/a"))
+        lines.append("Last checkpoint    %s" % self.hb.get("lastCheckpoint", "n/a"))
         if snap["watch_bytes"] is not None:
-            L.append("Watched file       %.1f KB" % (snap["watch_bytes"] / 1024.0))
-        L.append("Status             %s%s" % (state, "  - " + note if note else ""))
+            lines.append("Watched file       %.1f KB" % (snap["watch_bytes"] / 1024.0))
+        lines.append("Status             %s%s" % (state, "  - " + note if note else ""))
         for alert in self.alerts(mem_slope, trend, ratio):
-            L.append("  !  %s" % alert)
-        L.append("")
+            lines.append("  !  %s" % alert)
+        lines.append("")
         if self.hb.path:
-            L.append("heartbeat: %s" % self.hb.path)
-        L.append("log: %s" % self.csv_path)
-        L.append("samples: %d   %s" % (self.samples, datetime.now().strftime("%H:%M:%S")))
-        return L
+            lines.append("heartbeat: %s" % self.hb.path)
+        lines.append("log: %s" % self.csv_path)
+        lines.append("samples: %d   %s" % (self.samples, datetime.now().strftime("%H:%M:%S")))
+        return lines
 
     def snapshot(self, snap):
-        """
-        One dict carrying every derived value, for presentation layers that
-        should not re-derive any of this themselves. Fields that are not yet
-        trustworthy come back as None with a matching *_collecting flag, so a
-        dashboard can render "collecting" rather than plotting a warm-up
-        artifact as a trend.
-        """
         proc = snap["proc"]
+        system = snap["system"]
         mem_slope = self.memory_trend()
         trend, ratio = self.throughput_trend()
         state, note = self.status()
@@ -749,6 +960,12 @@ class Monitor(object):
             "host": self.hb.get("host"),
             "writes": self.hb.get("writes"),
             "heartbeat_note": self.hb.get("note"),
+            "heartbeat_schema": self.hb.get("schemaVersion"),
+            "tool": self.hb.get("tool"),
+            "tool_version": self.hb.get("toolVersion"),
+            "harness_version": self.hb.get("harnessVersion"),
+            "job_mode": self.hb.get("mode"),
+            "metrics": self.hb.get("metrics", []),
             "target": target,
             "total": total,
             "percent": pct,
@@ -770,6 +987,16 @@ class Monitor(object):
             "pagefile_mb": proc["pagefile_mb"],
             "threads": proc["threads"],
             "handles": proc["handles"],
+            "page_faults": proc.get("page_faults"),
+            "gdi_objects": proc.get("gdi_objects"),
+            "user_objects": proc.get("user_objects"),
+            "io_read_bytes": proc.get("io_read_bytes"),
+            "io_write_bytes": proc.get("io_write_bytes"),
+            "io_other_bytes": proc.get("io_other_bytes"),
+            "io_read_ops": proc.get("io_read_ops"),
+            "io_write_ops": proc.get("io_write_ops"),
+            "io_other_ops": proc.get("io_other_ops"),
+            "system": system,
             "responding": snap["responding"],
             "memory_slope": mem_slope,
             "memory_collecting": mem_slope is None,
@@ -793,8 +1020,7 @@ class Monitor(object):
             while True:
                 snap = self.tick()
                 if snap is None:
-                    print("\nProcess %s has exited. Log written to %s"
-                          % (self.pid, self.csv_path))
+                    print("\nProcess %s has exited. Log written to %s" % (self.pid, self.csv_path))
                     return 0
                 lines = self.render(snap)
                 if ansi:
@@ -827,38 +1053,81 @@ def report(path, stall_seconds):
 
     def num(row, key):
         try:
-            return float(row[key])
-        except (TypeError, ValueError, KeyError):
+            value = row.get(key)
+            return float(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
             return None
 
+    def series(key):
+        return [num(row, key) for row in rows if num(row, key) is not None]
+
+    def print_delta(label, key, unit=""):
+        values = series(key)
+        if not values:
+            return
+        suffix = (" " + unit) if unit else ""
+        print("%-17s start %.1f%s   end %.1f%s   peak %.1f%s   delta %+.1f%s"
+              % (label, values[0], suffix, values[-1], suffix, max(values), suffix,
+                 values[-1] - values[0], suffix))
+
     t0, t1 = num(rows[0], "epoch"), num(rows[-1], "epoch")
-    mem = [(num(r, "epoch"), num(r, "private_mb")) for r in rows if num(r, "private_mb")]
-    tgt = [(num(r, "epoch"), num(r, "target")) for r in rows if num(r, "target")]
+    mem = [(num(row, "epoch"), num(row, "private_mb"))
+           for row in rows if num(row, "epoch") is not None and num(row, "private_mb") is not None]
+    tgt = [(num(row, "epoch"), num(row, "target"))
+           for row in rows if num(row, "epoch") is not None and num(row, "target") is not None]
     slope = slope_per_hour(mem)
     job = rows[-1].get("job") or "(unnamed job)"
 
     print("ScriptWatch report - %s" % path)
     print("Job              %s" % job)
-    print("Window           %s -> %s  (%s)"
-          % (rows[0]["iso"], rows[-1]["iso"], hms((t1 - t0) if t0 and t1 else None)))
+    print("Window           %s -> %s  (%s)" % (
+        rows[0].get("iso", ""), rows[-1].get("iso", ""),
+        hms((t1 - t0) if t0 is not None and t1 is not None else None)))
     print("Samples          %d" % len(rows))
-    heartbeat_notes = [str(r.get("heartbeat_note") or "").strip()
-                       for r in rows if str(r.get("heartbeat_note") or "").strip()]
+
+    tool = rows[-1].get("tool") or ""
+    tool_version = rows[-1].get("tool_version") or ""
+    harness_version = rows[-1].get("harness_version") or ""
+    if harness_version:
+        print("Harness          %s%s%s" % (
+            harness_version, "   " + tool if tool else "",
+            " " + tool_version if tool_version else ""))
+    heartbeat_notes = [str(row.get("heartbeat_note") or "").strip()
+                       for row in rows if str(row.get("heartbeat_note") or "").strip()]
     if heartbeat_notes:
         print("Heartbeat note   %s" % heartbeat_notes[-1])
+
     if mem:
-        print("Private MB       start %.1f   end %.1f   peak %.1f   delta %+.1f"
-              % (mem[0][1], mem[-1][1], max(v for _, v in mem), mem[-1][1] - mem[0][1]))
+        print("Private MB       start %.1f   end %.1f   peak %.1f   delta %+.1f" % (
+            mem[0][1], mem[-1][1], max(value for _, value in mem), mem[-1][1] - mem[0][1]))
         span = (mem[-1][0] - mem[0][0]) if len(mem) >= 2 else 0
         if span < MIN_TREND_SPAN:
-            print("Memory slope     not reported - only %s of coverage, which is"
-                  % hms(span))
-            print("                 process warm-up rather than steady state")
+            print("Memory slope     not reported - only %s of coverage" % hms(span))
         elif slope is not None:
             verdict = ("flat - no evidence of accumulation" if abs(slope) < 5
                        else "rising - consistent with retention between targets"
                        if slope > 0 else "falling - memory returned to the OS")
             print("Memory slope     %+.2f MB/hour   (%s)" % (slope, verdict))
+
+    print_delta("System RAM %", "system_physical_used_pct", "%")
+    print_delta("System commit %", "system_commit_pct", "%")
+
+    def byte_delta(label, key):
+        values = series(key)
+        if values:
+            print("%-17s delta %+.1f MB" % (label, (values[-1] - values[0]) / MB))
+
+    byte_delta("I/O read", "io_read_bytes")
+    byte_delta("I/O write", "io_write_bytes")
+    byte_delta("I/O other", "io_other_bytes")
+
+    for label, key in (("Page faults", "page_faults"), ("GDI objects", "gdi_objects"),
+                       ("USER objects", "user_objects"), ("Handles", "handles")):
+        values = series(key)
+        if values:
+            print("%-17s start %d   end %d   peak %d   delta %+d" % (
+                label, values[0], values[-1], max(values), values[-1] - values[0]))
+
     if len(tgt) >= 2:
         span = tgt[-1][0] - tgt[0][0]
         done = tgt[-1][1] - tgt[0][1]
@@ -870,19 +1139,27 @@ def report(path, stall_seconds):
             dt, dn = seq[-1][0] - seq[0][0], seq[-1][1] - seq[0][1]
             if dt > 0 and dn > 0:
                 print("%-16s %.2f targets/min" % (label, dn / (dt / 60.0)))
-    ages = [num(r, "hb_age_s") or 0 for r in rows]
-    stalls = sum(1 for a in ages if a > stall_seconds)
-    print("Heartbeat        max age %s   samples over threshold: %d"
-          % (hms(max(ages) if ages else None), stalls))
-    handles = [num(r, "handles") for r in rows if num(r, "handles")]
-    if handles:
-        print("Handles          start %d   end %d   peak %d   delta %+d"
-              % (handles[0], handles[-1], max(handles), handles[-1] - handles[0]))
-        if handles[-1] - handles[0] > 200:
-            print("                 (rising handle count indicates leaked OS resources -")
-            print("                  files, events, sections, registry keys. It is a")
-            print("                  separate question from private-memory growth, which")
-            print("                  can rise from script-side retention alone.)")
+
+    ages = [num(row, "hb_age_s") or 0 for row in rows]
+    stalls = sum(1 for age in ages if age > stall_seconds)
+    print("Heartbeat        max age %s   samples over threshold: %d" % (
+        hms(max(ages) if ages else None), stalls))
+
+    metrics_rows = [row.get("metrics_json") for row in rows if row.get("metrics_json")]
+    if metrics_rows:
+        try:
+            metrics = json.loads(metrics_rows[-1])
+            if metrics:
+                print("Harness metrics  %d final metric%s recorded" % (
+                    len(metrics), "" if len(metrics) == 1 else "s"))
+                for metric in metrics[:12]:
+                    if isinstance(metric, dict):
+                        unit = str(metric.get("unit") or "")
+                        print("  %-15s %s%s" % (
+                            str(metric.get("name") or "metric"), metric.get("value"),
+                            (" " + unit) if unit else ""))
+        except Exception:
+            pass
     return 0
 
 
@@ -891,20 +1168,12 @@ def report(path, stall_seconds):
 # --------------------------------------------------------------------------
 
 def build_parser():
-    """
-    The collector's CLI, exposed so other entry points (scriptwatch_web.py) can
-    inherit its defaults instead of restating them. A flag added here reaches
-    every front end without a second edit.
-    """
     ap = argparse.ArgumentParser(
         prog="scriptwatch",
         description="External runtime monitor for InDesign ExtendScript jobs.")
-    ap.add_argument("--dir", "-d", help="runtime directory for heartbeat discovery and "
-                                        "the sample log (default: DocStats, or "
-                                        "SCRIPTWATCH_DIR, or the working directory)")
+    ap.add_argument("--dir", "-d", help="runtime directory for heartbeat discovery and sample log")
     ap.add_argument("--heartbeat", "-b", default=os.environ.get("SCRIPTWATCH_HEARTBEAT"),
-                    help="path to the JSON heartbeat written by the job "
-                         "(default: newest valid heartbeat in the runtime directory)")
+                    help="heartbeat JSON path; newest plausible heartbeat is auto-discovered")
     ap.add_argument("--pid", type=int, help="attach to this PID instead of searching")
     ap.add_argument("--process", default=DEFAULT_PROCESS,
                     help="process name fragment to match (default: InDesign)")
@@ -917,7 +1186,7 @@ def build_parser():
     ap.add_argument("--mem-alert", type=float, default=DEFAULT_MEM_ALERT,
                     help="MB/hour slope that raises a memory alert (default: 50)")
     ap.add_argument("--watch", help="optional log or checkpoint file to track for growth")
-    ap.add_argument("--csv", help="sample log path (default: timestamped file here)")
+    ap.add_argument("--csv", help="sample log path (default: timestamped file in runtime directory)")
     ap.add_argument("--once", action="store_true", help="print one snapshot and exit")
     ap.add_argument("--no-clear", action="store_true", help="append output instead of redrawing")
     ap.add_argument("--report", metavar="CSV", help="analyze a finished run and exit")
@@ -926,11 +1195,10 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-
     if args.report:
         return report(args.report, args.stall)
     monitor = Monitor(args)
-    time.sleep(0.5)  # let the first CPU delta accumulate before sampling
+    time.sleep(0.5)
     return monitor.run()
 
 
