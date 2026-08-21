@@ -1,56 +1,26 @@
 /**
  * ScriptWatchJob.jsxinc
  * ---------------------
- * The single adoption point for ScriptWatch across the suite. DocStats,
- * StyleFix, HeaderFix, NormalFix, TableFix, and anything after them include
- * this file and describe their work the same way, so one job reports exactly
- * like every other job.
+ * ScriptWatch Harness. This is the single preferred adoption point for suite
+ * tools and an optional integration point for external/community scripts.
  *
- * Include order matters:
+ * Include order:
  *   #include "ScriptWatchHeartbeat.jsxinc"
  *   #include "ScriptWatchJob.jsxinc"
  *
- * If the heartbeat include is absent, observation becomes a no-op and the
- * tool work still runs through this harness. Observation is never a dependency
- * of the work.
+ * The Harness is fail-isolated from the observed work. If the heartbeat
+ * transport is absent or fails, the tool continues and Harness calls become
+ * no-op observation.
  *
- * Two shapes, because the tools are not all loops:
- *
- *   1. run() - a tool that iterates a collection of targets
- *
- *      ScriptWatchJob.run({
- *          job: "NormalFix Read-Only Sweep",
- *          tool: "NormalFix",
- *          targets: paragraphs,
- *          checkpointEvery: 25,
- *          onTarget: function (para, n) {
- *              return normalizeParagraph(para);   // true = PASS, false = FAIL
- *          }
- *      });
- *
- *   2. begin() - a tool that moves through named phases
- *
- *      var job = ScriptWatchJob.begin({ job: "DocStats Inventory", total: 6 });
- *      job.step("Counting stories");   ... job.pass();
- *      job.step("Auditing styles");    ... job.fail("style table missing");
- *      job.end("DONE");
- *
- * Conventions this file exists to enforce:
- *   - One target is one unit of work the ETA should be built from. For a
- *     nested tool, that is the OUTER loop; report inner progress with note().
- *   - PASS/FAIL is decided by the return value of onTarget: false is a FAIL,
- *     a thrown error is a FAIL, anything else (including undefined) is a PASS.
- *     A tool that returns nothing therefore reports every target as a pass,
- *     which is the right default for read-only sweeps.
- *   - A failing target stops the sweep only when continueOnError is false.
- *   - finish() always runs, including on abort, so the console never shows a
- *     job as RUNNING after it has stopped.
+ * Two shapes:
+ *   ScriptWatchJob.run({...})   collection-driven work
+ *   ScriptWatchJob.begin({...}) phase-driven work
  */
 
 // eslint-disable-next-line no-unused-vars
 var ScriptWatchJob = (function () {
 
-    var VERSION = "1.1";
+    var VERSION = "1.2";
     var MAX_RECORDED_ERRORS = 25;
 
     function available() {
@@ -76,37 +46,35 @@ var ScriptWatchJob = (function () {
         return text;
     }
 
-    /**
-     * Shared state handle. Every reporting call is wrapped so a heartbeat
-     * failure cannot reach the tool.
-     */
     function Session(opts) {
         opts = opts || {};
-        this.total = opts.total || 0;
-        this.index = opts.startTarget || 0;
-        // Counters are named apart from pass()/fail(): assigning this.pass = 0
-        // would shadow the prototype method with a number.
+        this.tool = opts.tool || "tool";
+        this.toolVersion = opts.toolVersion || "";
+        this.mode = opts.mode || "phase";
+        this.total = (typeof opts.total === "number") ? opts.total : 0;
+        this.index = (typeof opts.startTarget === "number") ? opts.startTarget : 0;
         this.passCount = 0;
         this.failCount = 0;
         this.errors = [];
-        this.checkpointEvery = opts.checkpointEvery || 25;
+        this.checkpointEvery = (typeof opts.checkpointEvery === "number") ? opts.checkpointEvery : 25;
         this.gcOnCheckpoint = opts.gcOnCheckpoint !== false;
-        this.contract = (opts.tool || "tool") + " · harness " + VERSION;
+        this.contract = this.tool + " · harness " + VERSION;
         this.live = false;
 
         if (!available()) { return; }
         try {
             ScriptWatch.start({
-                job: opts.job || opts.tool || "ExtendScript Job",
+                job: opts.job || this.tool || "ExtendScript Job",
+                tool: this.tool,
+                toolVersion: this.toolVersion,
+                harnessVersion: VERSION,
+                mode: this.mode,
                 total: this.total,
                 startTarget: this.index,
                 path: opts.path,
                 everyTargets: opts.everyTargets,
                 everyMs: opts.everyMs
             });
-            // Keep the harness identity at the front of every note. The note
-            // field is persisted into ScriptWatch CSV samples, so a later phase
-            // label or terminal error must not erase the contract version.
             ScriptWatch.note(this.contract);
             this.live = true;
         } catch (e) {
@@ -114,7 +82,6 @@ var ScriptWatchJob = (function () {
         }
     }
 
-    /** Advance to the next target. label is optional free text for the console. */
     Session.prototype.step = function (label) {
         this.index += 1;
         if (this.live && label !== undefined) {
@@ -134,11 +101,10 @@ var ScriptWatchJob = (function () {
         if (reason !== undefined && this.errors.length < MAX_RECORDED_ERRORS) {
             this.errors.push("target " + this.index + ": " + describe(reason));
         }
-        this.report(true);   // failures are worth publishing immediately
+        this.report(true);
         return false;
     };
 
-    /** Publish current counts. Throttling lives in the heartbeat writer. */
     Session.prototype.report = function (force) {
         if (!this.live) { return; }
         try {
@@ -160,10 +126,24 @@ var ScriptWatchJob = (function () {
         } catch (e) {}
     };
 
-    /** Durable checkpoint, optionally draining the ExtendScript heap. */
+    /**
+     * Publish a numeric domain metric. opts may contain:
+     *   unit, min, max, display (counter|dial|trend), note, force
+     *
+     * ScriptWatch stores the metric in the heartbeat and CSV. The dashboard
+     * renders current custom metrics as number-in-box counters; display/min/max
+     * metadata is retained so richer presentation can be added without changing
+     * the producer contract.
+     */
+    Session.prototype.metric = function (name, value, opts) {
+        if (!this.live || typeof ScriptWatch.metric !== "function") { return false; }
+        try { return ScriptWatch.metric(name, value, opts || {}); } catch (e) {}
+        return false;
+    };
+
     Session.prototype.checkpoint = function () {
         if (!this.live) {
-            if (this.gcOnCheckpoint) { try { $.gc(); } catch (e) {} }
+            if (this.gcOnCheckpoint) { try { $.gc(); $.gc(); } catch (e) {} }
             return this.index;
         }
         try { ScriptWatch.checkpoint(this.index, this.gcOnCheckpoint); } catch (e) {}
@@ -189,6 +169,10 @@ var ScriptWatchJob = (function () {
 
     Session.prototype.summary = function () {
         return {
+            tool: this.tool,
+            toolVersion: this.toolVersion,
+            harnessVersion: VERSION,
+            mode: this.mode,
             total: this.total,
             completed: this.index,
             pass: this.passCount,
@@ -197,20 +181,26 @@ var ScriptWatchJob = (function () {
         };
     };
 
-    // ------------------------------------------------------------------ api
-
     var api = {};
-
     api.VERSION = VERSION;
 
-    /** Phase-based tools: drive the session yourself. */
     api.begin = function (opts) {
-        return new Session(opts);
+        opts = opts || {};
+        var phaseOpts = {};
+        var key;
+        for (key in opts) {
+            if (opts.hasOwnProperty ? opts.hasOwnProperty(key) : true) {
+                phaseOpts[key] = opts[key];
+            }
+        }
+        if (!phaseOpts.mode) { phaseOpts.mode = "phase"; }
+        return new Session(phaseOpts);
     };
 
     /**
-     * Loop-based tools: hand over the collection and the per-target function.
-     * Returns { total, completed, pass, fail, errors, aborted }.
+     * Collection-driven work. Returns
+     * { tool, toolVersion, harnessVersion, mode, total, completed,
+     *   pass, fail, errors, aborted }.
      */
     api.run = function (opts) {
         opts = opts || {};
@@ -219,13 +209,15 @@ var ScriptWatchJob = (function () {
         }
 
         var targets = opts.targets;
-        var total = opts.total || countOf(targets);
-        var start = opts.startTarget || 0;
+        var total = (typeof opts.total === "number") ? opts.total : countOf(targets);
+        var start = (typeof opts.startTarget === "number") ? opts.startTarget : 0;
         var continueOnError = opts.continueOnError !== false;
 
         var session = new Session({
             job: opts.job,
             tool: opts.tool,
+            toolVersion: opts.toolVersion,
+            mode: opts.mode || "collection",
             total: total,
             startTarget: start,
             path: opts.path,
@@ -239,11 +231,11 @@ var ScriptWatchJob = (function () {
         var fatal = null;
 
         try {
-            for (var i = start; i < total; i++) {
+            for (var i = start; i < total; i += 1) {
                 session.step();
                 var outcome;
                 try {
-                    outcome = opts.onTarget(itemAt(targets, i), i + 1);
+                    outcome = opts.onTarget(itemAt(targets, i), i + 1, session);
                     if (outcome === false) {
                         session.fail("reported failure");
                         if (!continueOnError) {
@@ -267,15 +259,13 @@ var ScriptWatchJob = (function () {
                 if (typeof opts.onCheckpoint === "function" &&
                     session.checkpointEvery > 0 &&
                     (session.index % session.checkpointEvery) === 0) {
-                    try { opts.onCheckpoint(session.index); } catch (e) {}
+                    try { opts.onCheckpoint(session.index, session); } catch (e) {}
                 }
             }
         } catch (loopError) {
             fatal = loopError;
             aborted = true;
         } finally {
-            // Always publish a terminal state. A console showing RUNNING for a
-            // job that died is worse than no console at all.
             session.end(aborted ? "ABORTED" : "DONE",
                         aborted ? describe(fatal) : undefined);
         }
