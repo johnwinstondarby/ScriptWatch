@@ -10,6 +10,7 @@ class VisualContractTests(unittest.TestCase):
         html = (DASHBOARD / "index.html").read_text(encoding="utf-8")
         self.assertLess(html.index('href="style.css"'), html.index('href="spotlight.css"'))
         self.assertLess(html.index('href="spotlight.css"'), html.index('href="spotlight_sources.css"'))
+        self.assertLess(html.index('href="spotlight_sources.css"'), html.index('href="material.css"'))
         self.assertLess(html.index('src="instrument_state.js"'), html.index('src="app.js"'))
         self.assertLess(html.index('src="app.js"'), html.index('src="spotlight.js"'))
 
@@ -110,12 +111,37 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn("per-counter lamp or dot must encode a real property", contract)
         self.assertIn(".counter-card::before { content:none", css)
 
+    def test_dimensional_material_layer_is_semantic_safe(self):
+        html = (DASHBOARD / "index.html").read_text(encoding="utf-8")
+        material = (DASHBOARD / "material.css").read_text(encoding="utf-8")
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        self.assertIn('href="material.css"', html)
+        self.assertIn("Hue remains semantic", material)
+        self.assertIn("Motion remains the liveness channel", material)
+        self.assertIn("swCounterRunner", material)
+        self.assertIn("swMaterialPacket", material)
+        self.assertIn("swMeterGlint", material)
+        self.assertIn("Hue carries condition. Shading carries form. Motion carries liveness.", contract)
+        self.assertIn("static glow, shading, or reflection never proves liveness", contract)
+
+    def test_material_liveness_carriers_stop_outside_live_states(self):
+        material = (DASHBOARD / "material.css").read_text(encoding="utf-8")
+        self.assertIn(".counter-card.state-live::after", material)
+        self.assertIn(".counter-card.state-limit::after", material)
+        self.assertNotIn(".counter-card.state-dormant::after", material)
+        self.assertIn(".capacity-meter.state-live .capacity-fill::after", material)
+        self.assertIn(".capacity-meter.state-limit .capacity-fill::after", material)
+        self.assertIn(".source-node.state-live:not(:last-child)::before", material)
+        self.assertIn(".source-node.state-limit:not(:last-child)::before", material)
+
     def test_reduced_motion_is_preserved(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
         source_css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
+        material = (DASHBOARD / "material.css").read_text(encoding="utf-8")
         workbench = (DASHBOARD / "workbench.html").read_text(encoding="utf-8")
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("prefers-reduced-motion", source_css)
+        self.assertIn("prefers-reduced-motion", material)
         self.assertIn("prefers-reduced-motion", workbench)
 
 
