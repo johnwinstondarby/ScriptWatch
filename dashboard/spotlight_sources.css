@@ -1,5 +1,5 @@
 /*
-ScriptWatch source-partition visual layer v0.1.0
+ScriptWatch source-partition visual layer v0.2.0
 
 This companion layer makes Harness state explicit and groups counters by their
 acquisition source without changing collector or Harness semantics.
@@ -16,40 +16,40 @@ acquisition source without changing collector or Harness semantics.
    ------------------------------------------------------------------------- */
 
 .top-status {
-  min-width: 430px;
+  min-width: 450px;
 }
 
 .harness-indicator {
   --harness-state: var(--sw-console-gray);
-  min-width: 118px;
+  min-width: 132px;
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
+  grid-template-columns: 10px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
-  padding: 6px 9px;
-  margin-right: 4px;
-  border: 1px solid color-mix(in srgb, var(--harness-state) 42%, #263943);
+  gap: 8px;
+  padding: 7px 10px;
+  margin-right: 5px;
+  border: 1px solid color-mix(in srgb, var(--harness-state) 46%, #263943);
   border-radius: 2px;
-  background: linear-gradient(180deg, rgba(13,25,32,.92), rgba(4,11,15,.96));
+  background: linear-gradient(180deg, rgba(13,25,32,.94), rgba(4,11,15,.97));
   box-shadow:
     inset 0 0 12px rgba(0,0,0,.32),
-    0 0 12px color-mix(in srgb, var(--harness-state) 8%, transparent);
+    0 0 13px color-mix(in srgb, var(--harness-state) 9%, transparent);
   text-align: left;
 }
 
 .harness-indicator-lamp {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   color: var(--harness-state);
   background: currentColor;
-  box-shadow: 0 0 8px currentColor;
+  box-shadow: 0 0 9px currentColor;
 }
 
 .harness-indicator-label {
   display: inline;
-  color: #7c9199;
-  font: 700 7px Consolas, monospace;
+  color: #83979f;
+  font: 700 8px Consolas, monospace;
   letter-spacing: .09em;
 }
 
@@ -57,7 +57,7 @@ acquisition source without changing collector or Harness semantics.
   display: inline;
   margin-left: 3px;
   color: var(--harness-state);
-  font: 800 12px Consolas, monospace;
+  font: 800 14px Consolas, monospace;
   letter-spacing: .05em;
   text-shadow: 0 0 8px color-mix(in srgb, var(--harness-state) 25%, transparent);
 }
@@ -65,15 +65,15 @@ acquisition source without changing collector or Harness semantics.
 .harness-indicator small {
   display: block;
   margin-top: 2px;
-  color: #6e838b;
-  font: 7px Consolas, monospace;
+  color: #738890;
+  font: 8px Consolas, monospace;
   white-space: nowrap;
 }
 
 .harness-indicator.state-live { --harness-state: var(--sw-console-green); }
 .harness-indicator.state-dormant { --harness-state: var(--sw-console-amber); }
 .harness-indicator.state-fault { --harness-state: var(--sw-console-red); }
-.harness-indicator.state-unsupported { --harness-state: var(--sw-console-gray); opacity: .76; }
+.harness-indicator.state-unsupported { --harness-state: var(--sw-console-gray); opacity: .82; }
 
 .harness-indicator.state-live .harness-indicator-lamp {
   animation: sourceLamp 1.8s ease-in-out infinite;
@@ -92,7 +92,7 @@ acquisition source without changing collector or Harness semantics.
   --source-state: var(--sw-console-gray);
   position: relative;
   margin-bottom: 7px;
-  padding: 6px;
+  padding: 7px;
   border: 1px solid #283b45;
   border-left: 2px solid var(--source-accent);
   background:
@@ -106,45 +106,51 @@ acquisition source without changing collector or Harness semantics.
 .counter-source-group.source-other { --source-accent: var(--sw-console-gray); }
 
 .counter-source-heading,
-.harness-counter-heading {
+.harness-counter-heading,
+.harness-off-heading {
   --source-state: var(--sw-console-gray);
-  min-height: 30px;
+  min-height: 32px;
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
-  margin-bottom: 5px;
-  padding: 0 2px 5px;
+  margin-bottom: 6px;
+  padding: 0 2px 6px;
   border-bottom: 1px solid rgba(64, 85, 96, .42);
 }
 
 .counter-source-heading > div,
-.harness-counter-heading > div { min-width: 0; }
+.harness-counter-heading > div,
+.harness-off-heading > div { min-width: 0; }
 
 .counter-source-heading span:not(.counter-source-lamp),
-.harness-counter-heading span:not(.counter-source-lamp) {
+.harness-counter-heading span:not(.counter-source-lamp),
+.harness-off-heading span:not(.harness-off-lamp) {
   display: block;
   color: var(--source-accent, var(--sw-source-harness));
-  font: 700 8px Consolas, monospace;
+  font: 700 9px Consolas, monospace;
   letter-spacing: .1em;
 }
 
 .counter-source-heading small,
-.harness-counter-heading small {
+.harness-counter-heading small,
+.harness-off-heading small {
   display: block;
   margin-top: 2px;
-  color: #6f838b;
-  font: 7px Consolas, monospace;
+  color: #768a92;
+  font: 8px Consolas, monospace;
 }
 
 .counter-source-heading strong,
-.harness-counter-heading strong {
+.harness-counter-heading strong,
+.harness-off-heading strong {
   color: var(--source-state);
-  font: 700 8px Consolas, monospace;
+  font: 700 9px Consolas, monospace;
   letter-spacing: .06em;
 }
 
-.counter-source-lamp {
+.counter-source-lamp,
+.harness-off-lamp {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -165,17 +171,41 @@ acquisition source without changing collector or Harness semantics.
 .counter-source-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  gap: 6px;
+}
+
+.counter-source-grid .counter-card strong {
+  font-size: 15px;
+}
+
+/* Host counters remain adjacent to the host/memory instruments. */
+.source-column-runtime > .counter-section {
+  border-left: 2px solid rgba(75,220,255,.48);
+}
+
+/* Process counters are moved beside process trends so the center column no
+   longer carries every telemetry family. */
+.process-counter-bay {
+  border-left: 2px solid rgba(83,245,138,.48);
+}
+
+#process-counter-bay .counter-source-group {
+  margin-bottom: 0;
+}
+
+#process-counter-bay .counter-source-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* -------------------------------------------------------------------------
    Harness data bay
    ------------------------------------------------------------------------- */
 
-#harness-card {
+#harness-card,
+.harness-off-bay {
   border-left: 2px solid var(--sw-source-harness);
   background:
-    linear-gradient(90deg, rgba(159,145,255,.035), transparent 34%),
+    linear-gradient(90deg, rgba(159,145,255,.04), transparent 34%),
     linear-gradient(180deg, rgba(15,29,37,.92), rgba(6,15,20,.96));
 }
 
@@ -191,9 +221,9 @@ acquisition source without changing collector or Harness semantics.
 #job-metric-bank.harness-counter-bank:empty::before {
   content: "Harness ON · no custom counters published";
   grid-column: 1 / -1;
-  padding: 8px;
-  border: 1px dashed rgba(159,145,255,.22);
-  color: #7d7a9a;
+  padding: 9px;
+  border: 1px dashed rgba(159,145,255,.24);
+  color: #8983a8;
   font: 8px Consolas, monospace;
   text-align: center;
   letter-spacing: .04em;
@@ -203,9 +233,55 @@ acquisition source without changing collector or Harness semantics.
   border-left: 2px solid rgba(159,145,255,.5);
 }
 
+.harness-off-bay {
+  --source-state: var(--sw-console-gray);
+  margin-top: 8px;
+  padding: 9px 10px;
+}
+
+.harness-off-bay[hidden] { display: none; }
+
+.harness-off-heading {
+  --source-accent: var(--sw-source-harness);
+}
+
+.harness-off-body {
+  display: grid;
+  gap: 4px;
+  padding: 2px 2px 3px 15px;
+  position: relative;
+}
+
+.harness-off-body::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: linear-gradient(var(--sw-source-harness), transparent);
+  opacity: .35;
+}
+
+.harness-off-body b {
+  color: #9c98b8;
+  font: 700 10px Consolas, monospace;
+  letter-spacing: .04em;
+}
+
+.harness-off-body span {
+  color: #758991;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
 /* Source identity stays distinct from live/dormant/fault state. */
 .counter-source-group.source-host .counter-card { box-shadow: inset 2px 0 0 rgba(75,220,255,.07); }
 .counter-source-group.source-process .counter-card { box-shadow: inset 2px 0 0 rgba(83,245,138,.06); }
+
+/* Slightly stronger source bus text at high-density desktop resolutions. */
+.source-copy span { font-size: 9px; }
+.source-copy strong { font-size: 11px; }
 
 @media (prefers-reduced-motion: reduce) {
   .harness-indicator.state-live .harness-indicator-lamp {
@@ -215,11 +291,13 @@ acquisition source without changing collector or Harness semantics.
 
 @media (max-width: 1180px) {
   .top-status { min-width: 0; }
+  #process-counter-bay .counter-source-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
   .harness-indicator { min-width: 0; }
   .counter-source-grid,
+  #process-counter-bay .counter-source-grid,
   #job-metric-bank.harness-counter-bank {
     grid-template-columns: 1fr 1fr;
   }
