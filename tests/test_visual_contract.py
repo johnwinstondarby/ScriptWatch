@@ -10,6 +10,7 @@ class VisualContractTests(unittest.TestCase):
         html = (DASHBOARD / "index.html").read_text(encoding="utf-8")
         self.assertLess(html.index('href="style.css"'), html.index('href="spotlight.css"'))
         self.assertLess(html.index('href="spotlight.css"'), html.index('href="spotlight_sources.css"'))
+        self.assertLess(html.index('src="instrument_state.js"'), html.index('src="app.js"'))
         self.assertLess(html.index('src="app.js"'), html.index('src="spotlight.js"'))
 
     def test_visual_layer_does_not_poll_backend(self):
@@ -23,21 +24,24 @@ class VisualContractTests(unittest.TestCase):
         source_css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
         contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
         combined_css = css + "\n" + source_css
-        for state in ("live", "dormant", "fault", "unsupported"):
+        for state in ("never", "live", "dormant", "limit", "fault", "unsupported"):
             self.assertIn(f"state-{state}", combined_css)
         for state in ("NEVER_SAMPLED", "LIVE", "DORMANT", "AT_LIMIT", "FAULT"):
             self.assertIn(state, contract)
         self.assertIn("--sw-console-amber", css)
+        self.assertIn("--sw-console-limit", css)
         self.assertIn("telemetry-stale", css)
         self.assertIn("telemetry-fault", css)
 
     def test_shared_instrument_state_machine_is_pinned(self):
         state_js = (DASHBOARD / "instrument_state.js").read_text(encoding="utf-8")
+        spotlight = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
         contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
         for state in ("NEVER", "LIVE", "DORMANT", "LIMIT", "FAULT"):
             self.assertIn(f'{state}:', state_js)
         self.assertIn("lastKnown", state_js)
         self.assertIn("boundedState", state_js)
+        self.assertIn("ScriptWatchInstrumentState", spotlight)
         self.assertIn("instrument_state.js", contract)
         self.assertIn("Dormant", contract)
         self.assertIn("last known", contract)
@@ -51,6 +55,8 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn('src="instrument_state.js"', html)
         self.assertNotIn("fetch(", html)
         self.assertIn("Host → Process → Heartbeat → Harness", html)
+        self.assertIn("transitionModel", html)
+        self.assertIn("rigModels", html)
 
     def test_harness_state_is_explicit(self):
         js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
@@ -98,9 +104,11 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn("A Harness data bay remains visible even when Harness is OFF", contract)
 
     def test_counter_marks_are_not_decorative(self):
+        css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
         contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
         self.assertIn("Decorative dots", contract)
         self.assertIn("per-counter lamp or dot must encode a real property", contract)
+        self.assertIn(".counter-card::before { content:none", css)
 
     def test_reduced_motion_is_preserved(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
