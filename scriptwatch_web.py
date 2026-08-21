@@ -7,6 +7,11 @@ A local, dependency-free HTTP dashboard for ScriptWatch. It reuses the existing
 scriptwatch.py Monitor collector, so browser mode records the same CSV telemetry
 and applies the same heartbeat, PID-selection, memory-trend, and alert logic.
 
+The browser layer adds host-level memory telemetry for visualization. On Windows
+that comes from GetPerformanceInfo, a fast in-process API that exposes physical
+memory, commit, and global process/thread/handle counters without another
+PowerShell subprocess. Process/job values still come from Monitor.snapshot().
+
 Run:
     python scriptwatch_web.py
     python scriptwatch_web.py --pid 12345
@@ -38,6 +43,7 @@ import scriptwatch
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_HISTORY_POINTS = 360  # 30 minutes at the default five-second interval
+MB = 1024.0 * 1024.0
 
 
 def _safe_float(value):
@@ -58,13 +64,112 @@ def _safe_int(value):
         return None
 
 
-def _backend_name(probe):
-    name = probe.__class__.__name__
-    if name == "PsutilProbe":
-        return "psutil"
-    if name == "PowerShellProbe":
-        return "PowerShell Get-Process"
-    return name
+def _system_memory_sample():
+    """
+    Return host memory/commit counters without affecting the observed process.
+
+    Windows uses GetPerformanceInfo from psapi.dll. Its counters are system-wide
+    page counts, so physical and commit percentages have real denominators.
+    On non-Windows systems, psutil supplies physical RAM when available; commit
+    fields remain None rather than being mapped to a different concept.
+    """
+    empty = {
+        "physicalTotalMb": None,
+        "physicalAvailableMb": None,
+        "physicalUsedMb": None,
+        "physicalUsedPct": None,
+        "commitMb": None,
+        "commitLimitMb": None,
+        "commitPct": None,
+        "commitPeakMb": None,
+        "systemCacheMb": None,
+        "kernelPagedMb": None,
+        "kernelNonpagedMb": None,
+        "processCount": None,
+        "threadCount": None,
+        "handleCount": None,
+    }
+
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class PERFORMANCE_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("CommitTotal", ctypes.c_size_t),
+                    ("CommitLimit", ctypes.c_size_t),
+                    ("CommitPeak", ctypes.c_size_t),
+                    ("PhysicalTotal", ctypes.c_size_t),
+                    ("PhysicalAvailable", ctypes.c_size_t),
+                    ("SystemCache", ctypes.c_size_t),
+                    ("KernelTotal", ctypes.c_size_t),
+                    ("KernelPaged", ctypes.c_size_t),
+                    ("KernelNonpaged", ctypes.c_size_t),
+                    ("PageSize", ctypes.c_size_t),
+                    ("HandleCount", wintypes.DWORD),
+                    ("ProcessCount", wintypes.DWORD),
+                    ("ThreadCount", wintypes.DWORD),
+                ]
+
+            info = PERFORMANCE_INFORMATION()
+            info.cb = ctypes.sizeof(info)
+            fn = ctypes.windll.psapi.GetPerformanceInfo
+            fn.argtypes = [ctypes.POINTER(PERFORMANCE_INFORMATION), wintypes.DWORD]
+            fn.restype = wintypes.BOOL
+            if not fn(ctypes.byref(info), info.cb):
+                return empty
+
+            page = float(info.PageSize)
+
+            def pages_mb(value):
+                return float(value) * page / MB
+
+            total = pages_mb(info.PhysicalTotal)
+            available = pages_mb(info.PhysicalAvailable)
+            used = max(0.0, total - available)
+            commit = pages_mb(info.CommitTotal)
+            commit_limit = pages_mb(info.CommitLimit)
+
+            return {
+                "physicalTotalMb": total,
+                "physicalAvailableMb": available,
+                "physicalUsedMb": used,
+                "physicalUsedPct": (100.0 * used / total) if total else None,
+                "commitMb": commit,
+                "commitLimitMb": commit_limit,
+                "commitPct": (100.0 * commit / commit_limit) if commit_limit else None,
+                "commitPeakMb": pages_mb(info.CommitPeak),
+                "systemCacheMb": pages_mb(info.SystemCache),
+                "kernelPagedMb": pages_mb(info.KernelPaged),
+                "kernelNonpagedMb": pages_mb(info.KernelNonpaged),
+                "processCount": int(info.ProcessCount),
+                "threadCount": int(info.ThreadCount),
+                "handleCount": int(info.HandleCount),
+            }
+        except Exception:
+            return empty
+
+    psutil = getattr(scriptwatch, "psutil", None)
+    if psutil is not None:
+        try:
+            vm = psutil.virtual_memory()
+            total = float(vm.total) / MB
+            available = float(vm.available) / MB
+            used = max(0.0, total - available)
+            result = dict(empty)
+            result.update({
+                "physicalTotalMb": total,
+                "physicalAvailableMb": available,
+                "physicalUsedMb": used,
+                "physicalUsedPct": (100.0 * used / total) if total else None,
+                "processCount": len(psutil.pids()),
+            })
+            return result
+        except Exception:
+            pass
+    return empty
 
 
 class DashboardState:
@@ -77,6 +182,7 @@ class DashboardState:
         self.history = deque(maxlen=history_points)
         self.error = None
         self.exited = False
+        self.private_baseline_mb = None
         self.worker = threading.Thread(target=self._run, name="ScriptWatchSampler", daemon=True)
 
     def start(self):
@@ -130,12 +236,13 @@ class DashboardState:
 
     def _build_payload(self, snap):
         """
-        Every derived value comes from Monitor.snapshot(), which is the single
-        source of truth shared with the console. Re-deriving trends here would
-        let the dashboard and the console disagree about the same run.
+        Process/job derived values come from Monitor.snapshot(), which is the
+        single source of truth shared with the console. Host memory counters are
+        an independent browser-dashboard enrichment sampled beside that state.
         """
         monitor = self.monitor
         state = monitor.snapshot(snap)
+        system = _system_memory_sample()
 
         finish_at = None
         if state["eta"] is not None:
@@ -145,6 +252,13 @@ class DashboardState:
         percent = state["percent"]
         if percent is not None:
             percent = max(0.0, min(100.0, percent))
+
+        private_mb = _safe_float(state["private_mb"])
+        if self.private_baseline_mb is None and private_mb is not None:
+            self.private_baseline_mb = private_mb
+        private_delta = (private_mb - self.private_baseline_mb
+                         if private_mb is not None and self.private_baseline_mb is not None
+                         else None)
 
         return {
             "timestamp": state["sampled_at"],
@@ -176,7 +290,9 @@ class DashboardState:
                 "backend": state["probe"],
                 "uptimeSeconds": _safe_float(state["uptime"]),
                 "cpuPct": _safe_float(state["cpu"]),
-                "privateMb": _safe_float(state["private_mb"]),
+                "privateMb": private_mb,
+                "privateBaselineMb": _safe_float(self.private_baseline_mb),
+                "privateDeltaMb": _safe_float(private_delta),
                 "peakPrivateMb": _safe_float(state["peak_private_mb"]),
                 "workingMb": _safe_float(state["working_mb"]),
                 "pagefileMb": _safe_float(state["pagefile_mb"]),
@@ -184,6 +300,7 @@ class DashboardState:
                 "handles": _safe_int(state["handles"]),
                 "responding": state["responding"],
             },
+            "system": system,
             "trends": {
                 "memorySlopeMbHour": _safe_float(state["memory_slope"]),
                 "memoryCollecting": state["memory_collecting"],
@@ -198,6 +315,7 @@ class DashboardState:
             "monitor": {
                 "samples": state["samples"],
                 "started": monitor.started,
+                "intervalSeconds": self.interval,
                 "csvPath": state["csv_path"],
                 "watchBytes": state["watch_bytes"],
                 "directory": monitor.dir,
@@ -213,6 +331,8 @@ class DashboardState:
             "handles": payload["process"]["handles"],
             "rate": payload["job"]["ratePerMin"],
             "target": payload["job"]["target"],
+            "ramPct": payload["system"]["physicalUsedPct"],
+            "commitPct": payload["system"]["commitPct"],
         }
 
     def snapshot(self):
