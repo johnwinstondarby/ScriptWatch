@@ -2,7 +2,7 @@
 
 **Status:** Draft visual contract for the instrument-console dashboard.
 
-The ScriptWatch dashboard is a live operations console. Motion, color, and illumination communicate telemetry state and must remain semantically tied to data freshness.
+The ScriptWatch dashboard is a live operations console. Motion, color, illumination, placement, and source labeling communicate telemetry state and provenance and must remain semantically tied to data freshness.
 
 ## 1. Source-state vocabulary
 
@@ -29,7 +29,7 @@ Instrument motion is data-driven.
 
 Perpetual decorative animation without a live source is prohibited.
 
-## 3. Source bus
+## 3. Source bus and Harness state
 
 The console exposes the acquisition architecture as a source bus:
 
@@ -40,16 +40,14 @@ The console exposes the acquisition architecture as a source bus:
 
 Each source has its own lamp and state label. A process-only job can therefore show host/process as live, heartbeat as amber/no data, and Harness as neutral/off.
 
-### 3.1 Explicit Harness state
+Harness participation is also exposed as a top-level operator indicator because it changes the semantic depth of the observation:
 
-Harness participation is always visible as a binary operator indicator:
+- `HARNESS = ON` means the current job publishes the ScriptWatch Harness contract;
+- `HARNESS = OFF` means ScriptWatch is observing the job agentlessly;
+- `HARNESS = ON` with amber means the monitored script is Harness-enabled but fresh Harness data is unavailable;
+- `HARNESS = ON` with red means a known source/process failure prevents current Harness telemetry.
 
-- `HARNESS = ON` means the monitored script is publishing the ScriptWatch Harness contract;
-- `HARNESS = OFF` means ScriptWatch is observing the script through agentless process/host telemetry and any separately available raw heartbeat data.
-
-`OFF` is neutral/gray because a non-Harness script can still be observed correctly. It is not a fault. When a Harness-enabled job stops publishing fresh data, the indicator remains logically `ON` but changes to amber `DORMANT`. A known loss caused by process/dashboard failure uses red `FAULT`.
-
-The Harness version is shown with the ON state when available.
+`HARNESS = OFF` is neutral gray rather than amber. The absence of Harness instrumentation is a capability distinction, not stale data. The Harness version is shown with the ON state when available.
 
 ## 4. Instrument families
 
@@ -64,17 +62,17 @@ The visual layer uses a small reusable instrument vocabulary:
 
 Not every value earns a dial. Dense counters remain compact and readable.
 
-### 4.1 Counters by acquisition source
+### 4.1 Source-aligned counter bays
 
-Counter presentation preserves provenance. Counters are visually grouped into source bays rather than mixed into one undifferentiated bank.
+Counter provenance remains visually explicit after a value leaves the source bus. Counter families are placed near the part of the console that interprets them:
 
-**Host counters** contain Windows/system values such as available RAM, commit headroom and peak, system cache, kernel pools, and system process/thread/handle totals.
+- **Host counters** stay in Runtime Health beside system RAM, commit, cache, kernel-pool, and host-capacity instruments.
+- **InDesign process counters** sit in Trends & Alerts beside process history and retention signals. This includes working set, I/O, page faults, GDI/USER objects, threads, and handles.
+- **Harness counters** stay in Job Execution because they describe the meaning and progress of the script's work.
 
-**InDesign process counters** contain values sampled from the monitored InDesign process such as private-memory delta, working set, I/O deltas, page faults, GDI/USER objects, threads, and handles.
+A Harness data bay remains visible even when Harness is OFF. In that state it states that no Harness counters are published and that ScriptWatch is operating agentlessly. When Harness is ON, the live Harness provenance and custom counter bank replace that OFF bay.
 
-**Harness counters** contain only semantic values published by the monitored script through `ScriptWatchJob.metric()`. Harness counters live in their own Harness data bay and are shown only when `HARNESS = ON`. The bay remains conceptually separate from process/host counters because Harness data describes the work rather than the operating system process.
-
-Source identity and source health are separate visual dimensions. A host counter remains a host counter when its source goes dormant; its state changes to amber without changing provenance.
+Source identity and source state are separate dimensions. A process counter remains a process counter when its data turns amber; a Harness counter remains a Harness counter when its feed goes dormant.
 
 ## 5. Truthfulness rules
 
@@ -87,9 +85,10 @@ Source identity and source health are separate visual dimensions. A host counter
 - Harness ON/OFF is derived from actual Harness provenance in the current job payload, not from user configuration or expectation.
 - Job failure and telemetry failure are separate. A failed job does not turn healthy process/host telemetry red.
 - Browser stale-sampler state and stale heartbeat state remain distinct concepts.
+- Counter placement may change for readability, but source ownership and metric meaning do not.
 
 ## 6. Layering rule
 
-The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM and derived visual state, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
+The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, and derive visual state, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
 
 The current implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, and `dashboard/spotlight.js` after the existing dashboard assets so the original structure remains recoverable and reviewable.
