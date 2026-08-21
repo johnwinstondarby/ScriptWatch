@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 let lastSampleTimestamp = null;
 let activityAngle = 0;
+let jobMetricSignature = "";
 
 function num(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
@@ -11,6 +12,12 @@ function num(value, digits = 1) {
 function integer(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
   return Math.round(Number(value)).toLocaleString();
+}
+
+function signedInteger(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "--";
+  const n = Math.round(Number(value));
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toLocaleString()}`;
 }
 
 function duration(seconds) {
@@ -37,6 +44,16 @@ function signedMemory(mb) {
   return `${sign}${memoryValue(Math.abs(value))}`;
 }
 
+function byteValue(bytes, digits = 1) {
+  if (bytes === null || bytes === undefined || !Number.isFinite(Number(bytes))) return "--";
+  const value = Math.abs(Number(bytes));
+  const sign = Number(bytes) < 0 ? "−" : "";
+  if (value >= 1024 ** 3) return `${sign}${(value / (1024 ** 3)).toFixed(digits)} GB`;
+  if (value >= 1024 ** 2) return `${sign}${(value / (1024 ** 2)).toFixed(digits)} MB`;
+  if (value >= 1024) return `${sign}${(value / 1024).toFixed(digits)} KB`;
+  return `${sign}${Math.round(value)} B`;
+}
+
 function setGauge(el, percent) {
   const p = Math.max(0, Math.min(100, Number(percent) || 0));
   el.style.setProperty("--p", p);
@@ -50,16 +67,14 @@ function setDial(gauge, value, detailEl, detail) {
 }
 
 function sparkline(svg, history, key) {
-  // Number(null) is 0, so nulls must be removed explicitly or missing data is
-  // drawn as a real zero. Timestamp-derived x positions preserve real gaps.
   const points = history.map(p => ({
     t: Number(p.t),
     v: (p[key] === null || p[key] === undefined || !Number.isFinite(Number(p[key])))
       ? null
       : Number(p[key]),
   }));
-  const known = points.filter(p => p.v !== null);
-  if (known.length < 2) {
+  const known = points.filter(p => p.v !== null && Number.isFinite(p.t));
+  if (known.length < 2 || !points.length) {
     svg.innerHTML = "";
     return;
   }
@@ -71,12 +86,13 @@ function sparkline(svg, history, key) {
     min -= 1;
   }
 
-  const t0 = points[0].t;
-  const span = (points[points.length - 1].t - t0) || 1;
+  const finiteTimes = points.map(p => p.t).filter(Number.isFinite);
+  const t0 = finiteTimes[0];
+  const span = (finiteTimes[finiteTimes.length - 1] - t0) || 1;
   const segments = [];
   let run = [];
   for (const p of points) {
-    if (p.v === null) {
+    if (p.v === null || !Number.isFinite(p.t)) {
       if (run.length > 1) segments.push(run);
       run = [];
       continue;
@@ -86,7 +102,6 @@ function sparkline(svg, history, key) {
     run.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
   if (run.length > 1) segments.push(run);
-
   svg.innerHTML = segments.map(seg => `<polyline points="${seg.join(" ")}"></polyline>`).join("");
 }
 
@@ -148,8 +163,17 @@ const COUNTER_REGISTRY = [
       return Number.isFinite(Number(s.commitLimitMb)) && Number.isFinite(Number(s.commitMb))
         ? Number(s.commitLimitMb) - Number(s.commitMb) : null;
     }, format: v => memoryValue(v) },
+  { key: "commit-peak", label: "Commit peak", get: d => d.system?.commitPeakMb, format: v => memoryValue(v) },
+  { key: "system-cache", label: "System cache", get: d => d.system?.systemCacheMb, format: v => memoryValue(v) },
+  { key: "kernel-paged", label: "Kernel paged", get: d => d.system?.kernelPagedMb, format: v => memoryValue(v) },
+  { key: "kernel-nonpaged", label: "Kernel nonpaged", get: d => d.system?.kernelNonpagedMb, format: v => memoryValue(v) },
   { key: "private-delta", label: "Private Δ", get: d => d.process?.privateDeltaMb, format: v => signedMemory(v), note: "since attach" },
   { key: "working-set", label: "Working set", get: d => d.process?.workingMb, format: v => memoryValue(v) },
+  { key: "io-read", label: "I/O read Δ", get: d => d.process?.ioReadDeltaBytes, format: v => byteValue(v), note: "since attach" },
+  { key: "io-write", label: "I/O write Δ", get: d => d.process?.ioWriteDeltaBytes, format: v => byteValue(v), note: "since attach" },
+  { key: "page-faults", label: "Page faults Δ", get: d => d.process?.pageFaultDelta, format: v => signedInteger(v), note: "since attach" },
+  { key: "gdi", label: "GDI objects", get: d => d.process?.gdiObjects, format: v => integer(v) },
+  { key: "user", label: "USER objects", get: d => d.process?.userObjects, format: v => integer(v) },
   { key: "threads", label: "Threads", get: d => d.process?.threads, format: v => integer(v), note: "InDesign" },
   { key: "handles", label: "Handles", get: d => d.process?.handles, format: v => integer(v), note: "InDesign" },
   { key: "sys-processes", label: "System processes", get: d => d.system?.processCount, format: v => integer(v) },
@@ -184,6 +208,59 @@ function renderCounterBank(latest, freshSample) {
       window.setTimeout(() => card.classList.remove("sample-update"), 460);
     }
   }
+}
+
+function harnessMetricValue(metric) {
+  const value = Number(metric?.value);
+  if (!Number.isFinite(value)) return "--";
+  const text = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const unit = String(metric?.unit || "");
+  if (!unit) return text;
+  return unit === "%" ? `${text}%` : `${text} ${unit}`;
+}
+
+function renderHarness(job, freshSample) {
+  const card = $("harness-card");
+  const hasHarness = Boolean(job.harnessVersion);
+  card.hidden = !hasHarness;
+  if (!hasHarness) {
+    $("job-metric-bank").innerHTML = "";
+    jobMetricSignature = "";
+    return;
+  }
+
+  $("harness-version").textContent = `v${job.harnessVersion}`;
+  $("harness-tool").textContent = job.tool || "--";
+  $("harness-tool-version").textContent = job.toolVersion || "--";
+  $("harness-mode").textContent = job.mode || "--";
+  $("heartbeat-schema").textContent = job.heartbeatSchema || "--";
+
+  const metrics = Array.isArray(job.metrics) ? job.metrics.filter(m => m && m.name) : [];
+  const signature = metrics.map(m => String(m.name)).join("␟");
+  const bank = $("job-metric-bank");
+  bank.style.marginTop = metrics.length ? "8px" : "0";
+  if (signature !== jobMetricSignature) {
+    bank.innerHTML = metrics.map((m, i) =>
+      `<div class="counter-card" data-job-metric="${i}"><span>${escapeHtml(m.name)}</span><strong>--</strong>${m.note ? `<small>${escapeHtml(m.note)}</small>` : ""}</div>`
+    ).join("");
+    jobMetricSignature = signature;
+  }
+
+  metrics.forEach((metric, index) => {
+    const metricCard = bank.querySelector(`[data-job-metric="${index}"]`);
+    if (!metricCard) return;
+    const strong = metricCard.querySelector("strong");
+    const text = harnessMetricValue(metric);
+    const changed = strong.textContent !== text && strong.textContent !== "--";
+    strong.textContent = text;
+    metricCard.classList.toggle("unavailable", text === "--");
+    if (freshSample && changed) {
+      metricCard.classList.remove("sample-update");
+      void metricCard.offsetWidth;
+      metricCard.classList.add("sample-update");
+      window.setTimeout(() => metricCard.classList.remove("sample-update"), 460);
+    }
+  });
 }
 
 function render(payload) {
@@ -221,6 +298,8 @@ function render(payload) {
   $("avg-value").textContent = job.averageTargetMs == null ? "--" : `${num(job.averageTargetMs / 1000, 2)} s`;
   $("rate-value").textContent = num(job.ratePerMin, 2);
 
+  renderHarness(job, freshSample);
+
   $("heartbeat-state").textContent = job.heartbeatSeen ? "LIVE" : "NO HEARTBEAT";
   $("heartbeat-state").style.color = job.heartbeatSeen ? "var(--green)" : "var(--amber)";
   $("heartbeat-age").textContent = job.heartbeatAgeSeconds == null ? "n/a" : `${integer(job.heartbeatAgeSeconds)} sec`;
@@ -238,7 +317,6 @@ function render(payload) {
   $("po-required").textContent = duration(trends.coverageRequiredSeconds);
   $("po-csv-path").textContent = latest.monitor.csvPath || "CSV path pending…";
 
-  // Three bounded dials: process CPU, physical RAM use, and system commit charge.
   $("cpu-value").textContent = proc.cpuPct == null ? "--" : `${num(proc.cpuPct, 1)}%`;
   setDial($("cpu-gauge"), proc.cpuPct, $("cpu-detail"), "process load");
 
@@ -288,8 +366,6 @@ function render(payload) {
     $("counter-bank-state").textContent = `sample ${new Date(latest.timestamp * 1000).toLocaleTimeString()}`;
   }
 
-  // Without a heartbeat there is no throughput source at all. "Unavailable"
-  // differs from a trend still collecting toward its qualification floor.
   const trend = noHeartbeat
     ? "unavailable"
     : (trends.throughputCollecting ? "collecting…" : (trends.throughput || "stable"));
@@ -356,9 +432,11 @@ function render(payload) {
     $("status-text").textContent = `STALE · no sampler update for ${duration(sampleAge)}`;
   } else if (payload.error) {
     $("footer-status").textContent = `Collector warning: ${payload.error}`;
+  } else if (job.harnessVersion) {
+    $("footer-status").textContent = `Harness ${job.harnessVersion} + process + host telemetry`;
   } else {
     $("footer-status").textContent = job.heartbeatSeen
-      ? "Heartbeat + process telemetry + host memory telemetry"
+      ? "Heartbeat + process + host telemetry"
       : "Process + host telemetry only · no heartbeat from this job";
   }
 }
