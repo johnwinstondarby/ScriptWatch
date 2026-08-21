@@ -4,6 +4,8 @@
 
 The ScriptWatch dashboard is a live operations console. Motion, color, illumination, placement, and source labeling communicate telemetry state and provenance and must remain semantically tied to data freshness.
 
+The console is designed for two viewing distances. At operator distance, the numbers, provenance, trends, and labels support diagnosis. At NOC distance, motion and condition color must be sufficient to identify a stopped or unhealthy signal without reading text.
+
 ## 1. Instrument data-state vocabulary
 
 Every value-bearing instrument uses the same five-state behavior contract.
@@ -22,7 +24,7 @@ Every value-bearing instrument uses the same five-state behavior contract.
 
 `FAULT` does not present a last known number as a current reading. Historical panels and retained internal state may preserve prior samples for diagnosis, but the primary live instrument withholds the current value.
 
-Amber is a data-confidence state. It does not assert that the measured subsystem itself is unhealthy.
+Amber is a data-confidence state. It does not assert that the measured subsystem is itself unhealthy.
 
 ### 1.1 Capability is a separate axis
 
@@ -44,6 +46,47 @@ Instrument motion is data-driven.
 - `prefers-reduced-motion` disables continuous animation without changing state color, value rules, or text labels.
 
 Perpetual decorative animation without a live source is prohibited.
+
+### 2.1 NOC-distance observability gate
+
+ScriptWatch inherits the operating principle used by successful Spotlight deployments in high-density NOC environments: **motion communicates liveness; color communicates condition**.
+
+A primary instrument passes the NOC-distance gate only when an operator can determine, without reading its number or label, whether the monitored signal is alive and whether its condition is normal.
+
+The distance-view contract is:
+
+- green + motion = fresh and normal;
+- amber + stopped motion = dormant or stale, with the last known value retained for close inspection;
+- orange + motion = fresh but at a declared limit;
+- red + stopped motion = fault;
+- gray + no motion = never sampled or capability absent, with explicit capability labeling available at operator distance.
+
+The numerical value is diagnostic detail rather than the liveness signal. A value that remains unchanged across many samples must still show continuous live motion while fresh samples arrive.
+
+Every primary live instrument therefore requires an **activity carrier** appropriate to its form:
+
+- segmented dial: rotating or circulating tracer;
+- flow lane: travelling segments;
+- counter: moving runner or equivalent sample-life indicator independent of value change;
+- meter: travelling highlight through the active scale;
+- source path: travelling packet/dash between acquisition stages;
+- history panel: retained history remains static, while a sample-edge cursor or equivalent live acquisition marker may indicate fresh arrival.
+
+Activity carriers stop independently with the source that feeds them. A dormant Harness lane must not stop healthy host/process motion, and a process fault must not falsely mark healthy historical data as live.
+
+### 2.2 Tiled-console legibility
+
+ScriptWatch must remain interpretable when multiple consoles are tiled on a large display or when the dashboard is viewed from across a room.
+
+At reduced scale, the following must remain visible without reading body text:
+
+1. whether each critical source is moving;
+2. whether any critical source is amber, orange, or red rather than green;
+3. whether Harness participation is ON or OFF;
+4. which major bay owns the abnormal signal;
+5. whether a fault is local to one source or has propagated across the acquisition path.
+
+Fine typography, exact counts, paths, and trend detail are secondary at this distance. The visual hierarchy must preserve state and motion before text.
 
 ## 3. Source bus and Harness state
 
@@ -96,6 +139,8 @@ Source identity and source state are separate dimensions. A process counter rema
 
 A per-counter lamp or dot must encode a real property such as counter freshness or change. Decorative dots that repeat the source bay's state without adding information are prohibited. Source-group lamps carry source health; individual counter marks are added only when they convey additional counter-level state.
 
+A live counter whose numeric value has not changed still requires a liveness carrier. Value change and data freshness are separate conditions.
+
 ## 5. Color roles
 
 Color hierarchy is intentionally narrow:
@@ -122,9 +167,13 @@ The specimen-strip gate checks at least these distinctions:
 3. at-limit remains live and moving while using the limit color;
 4. fault stops motion and withholds the current value;
 5. reduced-motion mode preserves state meaning without animation;
-6. source/capability labels remain truthful without backend data.
+6. source/capability labels remain truthful without backend data;
+7. an unchanged live value still carries visible liveness motion;
+8. the same instrument remains classifiable by state when viewed at reduced scale or from NOC distance.
 
 The workbench also carries a fake Host → Process → Heartbeat → Harness rig so flow behavior can be reviewed without changing production telemetry code.
+
+A future tiled-console specimen may present multiple compact ScriptWatch instances simultaneously so one stopped or non-green critical system can be identified without reading labels. This is a visual-canary requirement rather than a backend multi-instance feature.
 
 ## 7. Truthfulness rules
 
@@ -139,6 +188,8 @@ The workbench also carries a fake Host → Process → Heartbeat → Harness rig
 - Job failure and telemetry failure are separate. A failed job does not turn healthy process/host telemetry red.
 - Browser stale-sampler state and stale heartbeat state remain distinct concepts.
 - Counter placement may change for readability, but source ownership and metric meaning do not.
+- Motion must indicate fresh sampling rather than numeric change alone.
+- Color must encode state consistently enough to remain meaningful at reduced scale.
 
 ## 8. Layering rule
 
