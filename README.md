@@ -51,7 +51,7 @@ ScriptWatch uses `psutil` when installed and otherwise falls back to PowerShell 
 
 ### Canonical collector counters
 
-The collector now records both process and host telemetry in the sample CSV. The browser no longer owns a second host-memory sampler.
+The collector records both process and host telemetry in the sample CSV. The browser does not own a second host-memory sampler.
 
 Process counters include:
 
@@ -87,6 +87,22 @@ python scriptwatch_web.py
 
 The dashboard binds to `127.0.0.1:8765` by default and opens in the default browser. It requires no additional Python package and uses `Monitor.snapshot()` as its telemetry contract.
 
+The source bus makes the acquisition paths visible as Host → InDesign Process → Heartbeat → Harness. Harness participation is also shown explicitly as `HARNESS = ON` or `HARNESS = OFF`.
+
+### Instrument state contract
+
+Every value-bearing instrument uses the same five data states:
+
+- `NEVER_SAMPLED`: neutral, stopped, and displays an em dash rather than inventing zero;
+- `LIVE`: current value with live motion;
+- `DORMANT`: amber, stopped, retaining the last known value;
+- `AT_LIMIT`: orange, still live and moving because the bounded source is fresh;
+- `FAULT`: red, stopped, with the current live value withheld.
+
+Capability absence is separate from those states. `HARNESS = OFF`, for example, is a neutral capability state rather than stale or faulted data.
+
+The shared behavior contract lives in `dashboard/instrument_state.js`. `docs/VISUAL_CONTRACT.md` is the normative visual/state specification.
+
 ### Job execution
 
 - target progress gauge
@@ -95,33 +111,49 @@ The dashboard binds to `127.0.0.1:8765` by default and opens in the default brow
 - average target time
 - throughput and ETA
 - heartbeat age and checkpoint
+- explicit Harness ON/OFF state
 - Harness tool/version/mode/schema provenance when present
-- custom Harness metrics as live number-in-box counters
+- custom Harness metrics in a dedicated Harness counter bay
 
 ### Runtime health
 
-- active circular dials for InDesign CPU, system physical-memory use, and system commit charge
-- sample-driven outer tracers that move only when a fresh telemetry sample arrives
+- segmented circular dials for InDesign CPU, system physical-memory use, and system commit charge
+- live outer tracers that continue while the source is fresh and stop on dormant/fault/never-sampled state
 - private memory, peak private memory, private delta since dashboard attach, and qualified private-memory slope
-- live counter bank for RAM/commit headroom, cache/kernel pools, working set, I/O deltas, page-fault delta, GDI/USER objects, process threads/handles, and system process/thread/handle counts
+- Host counter bay for RAM/commit headroom, cache/kernel pools, and system process/thread/handle counts
 - backend-local pagefile counter
 - PID, process uptime, and UI-pump state
-
-The circular activity tracer is sample-driven rather than decorative. If the sampler stalls, the tracer stops. Number-in-box counters briefly flash their border when a fresh sample changes the displayed value. Reduced-motion preferences disable those animations.
 
 ### Trends & alerts
 
 - throughput trend and sparkline
 - private-memory trend and sparkline
 - handle-count sparkline
+- InDesign Process counter bay for working set, I/O deltas, page faults, GDI/USER objects, threads, and handles
 - ScriptWatch alerts
 - sample count, trend coverage, and trend window
 - watched-file growth
 - CSV path
 
+Source-group lamps carry source health. Individual counter dots are not decorative; the current visual layer removes the redundant per-counter dot and uses change flash only when a fresh sample changes the displayed value.
+
+Reduced-motion preferences disable continuous travel without changing state color, value rules, or text labels.
+
 The dashboard binds to loopback. Binding elsewhere with `--host` publishes job names, runtime paths, and process telemetry to anyone who can reach the port, and ScriptWatch prints a warning saying so.
 
 Stopping the dashboard stops only the observer. It does not terminate InDesign or the observed ExtendScript job.
+
+## Instrument workbench
+
+The permanent no-backend visual canary is served with the dashboard:
+
+```text
+http://127.0.0.1:8765/workbench.html
+```
+
+It can also be opened directly from `dashboard/workbench.html` because it needs no backend and no InDesign process.
+
+The workbench displays `SegmentedDial`, `FlowLane`, `Counter`, and `Meter` in all five data states side by side and includes a synthetic Host → Process → Heartbeat → Harness rig. New instrument behavior is reviewed there before it enters the runtime console. The fake driver can run normally, drop the heartbeat, push a bounded value to its limit, fault the process, or reset every source to never-sampled.
 
 ## ScriptWatch Harness adoption
 
@@ -219,7 +251,7 @@ job.metric("Scan progress", 72.4, {
 });
 ```
 
-The transport accepts up to 32 current metrics per job. Metric values must be finite numbers. Supported display metadata is `counter`, `dial`, or `trend`; unsupported values normalize to `counter`. The current dashboard renders custom metrics as number-in-box counters while preserving display/min/max metadata in the heartbeat and CSV for future presentation logic.
+The transport accepts up to 32 current metrics per job. Metric values must be finite numbers. Supported display metadata is `counter`, `dial`, or `trend`; unsupported values normalize to `counter`. The dashboard currently renders custom metrics as number-in-box counters while preserving display/min/max metadata in the heartbeat and CSV for future presentation logic.
 
 This channel keeps domain telemetry out of the fixed ScriptWatch process schema. ScriptWatch knows the process and host. The Harness lets the script describe its own work.
 
@@ -243,8 +275,9 @@ The repository includes dependency-free canaries:
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
+node tests\instrument_state_canary.js
 node tests\harness_canary.js
 node tests\heartbeat_canary.js
 ```
 
-The collector canary covers heartbeat discovery, CSV-schema uniqueness, host-sample schema stability, and legacy-report compatibility. The JavaScript canaries cover Harness 1.2 provenance/metrics/fail-fast behavior and heartbeat 1.2 metric serialization, terminal state, lock release, and persistent-engine reset behavior.
+The collector canary covers heartbeat discovery, CSV-schema uniqueness, host-sample schema stability, and legacy-report compatibility. The visual-contract tests pin the source-aligned layout, Harness ON/OFF presentation, five-state vocabulary, shared state-machine load order, workbench presence, and reduced-motion behavior. The JavaScript canaries cover instrument state semantics, Harness 1.2 provenance/metrics/fail-fast behavior, and heartbeat 1.2 metric serialization, terminal state, lock release, and persistent-engine reset behavior.
