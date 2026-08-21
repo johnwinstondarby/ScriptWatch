@@ -61,7 +61,7 @@ The distance-view contract is:
 - red + stopped motion = fault;
 - gray + no motion = never sampled or capability absent, with explicit capability labeling available at operator distance.
 
-The numerical value is diagnostic detail rather than the liveness signal. A value that remains unchanged across many samples must still show continuous live motion while fresh samples arrive.
+The numerical value is diagnostic detail rather than the liveness signal. A value that remains unchanged across many samples must still show visible live motion while fresh samples arrive.
 
 Every primary live instrument therefore requires an **activity carrier** appropriate to its form:
 
@@ -74,7 +74,17 @@ Every primary live instrument therefore requires an **activity carrier** appropr
 
 Activity carriers stop independently with the source that feeds them. A dormant Harness lane must not stop healthy host/process motion, and a process fault must not falsely mark healthy historical data as live.
 
-### 2.2 Tiled-console legibility
+### 2.2 Sample-arrival motion
+
+Primary liveness motion is driven by sample arrival rather than by a free-running animation clock.
+
+One rendered sample produces one motion impulse or one bounded traverse. The duration may be derived from observed sample cadence so a slow probe visibly moves more slowly and a fast probe produces more frequent motion. If sample arrival stops, no new liveness impulse is generated.
+
+Collector-driven host/process carriers and heartbeat/Harness carriers remain source-specific. A collector sample does not create Heartbeat or Harness motion unless the heartbeat write state advanced with that sample.
+
+A moving carrier may finish its current sample impulse after the final sample. It must not start another traverse until a new authoritative sample arrives.
+
+### 2.3 Tiled-console legibility
 
 ScriptWatch must remain interpretable when multiple consoles are tiled on a large display or when the dashboard is viewed from across a room.
 
@@ -87,6 +97,8 @@ At reduced scale, the following must remain visible without reading body text:
 5. whether a fault is local to one source or has propagated across the acquisition path.
 
 Fine typography, exact counts, paths, and trend detail are secondary at this distance. The visual hierarchy must preserve state and motion before text.
+
+The nominal wall should remain visually quiet between motion impulses. Permanent bright underlines or decorative lights are prohibited when they reduce the contrast of a true exception.
 
 ## 3. Source bus and Harness state
 
@@ -107,6 +119,14 @@ Harness participation is also exposed as a top-level operator indicator because 
 - `HARNESS = ON` with red means a known source/process failure prevents current Harness telemetry.
 
 `HARNESS = OFF` is neutral gray rather than amber. The Harness version is shown with the ON state when available.
+
+### 3.1 Annunciation rollup
+
+One underlying condition should produce one primary NOC annunciation. Derived repetitions may remain available for desk-level diagnosis but must be visually subordinate to the source that owns the state.
+
+For heartbeat absence, the Heartbeat source-bus node is the primary amber annunciation. Masthead and Job Execution copies remain readable but are subdued so one missing source does not appear as several independent failures.
+
+Capability OFF states follow the same rule. A neutral Harness OFF indicator can appear in multiple diagnostic contexts without being promoted to an alarm color.
 
 ## 4. Instrument families
 
@@ -154,6 +174,8 @@ Color hierarchy is intentionally narrow:
 
 Source identity colors must not compete with state colors on primary value instruments. State has visual priority.
 
+Historical traces are contextual rather than annunciators. Their colors remain green or neutral/desaturated unless the history panel itself is explicitly reporting an abnormal state.
+
 ### 5.1 Dimensional material rendering
 
 ScriptWatch uses dimensional rendering to improve visual quality without adding another semantic channel.
@@ -193,7 +215,9 @@ The specimen-strip gate checks at least these distinctions:
 6. source/capability labels remain truthful without backend data;
 7. an unchanged live value still carries visible liveness motion;
 8. the same instrument remains classifiable by state when viewed at reduced scale or from NOC distance;
-9. dimensional material rendering improves close-range quality without weakening the semantic hue or liveness carrier.
+9. dimensional material rendering improves close-range quality without weakening the semantic hue or liveness carrier;
+10. liveness motion is triggered by sample arrival rather than a free-running visual clock;
+11. repeated copies of one condition do not create multiple equal-strength alarms.
 
 The workbench also carries a fake Host → Process → Heartbeat → Harness rig so flow behavior can be reviewed without changing production telemetry code.
 
@@ -215,9 +239,11 @@ A future tiled-console specimen may present multiple compact ScriptWatch instanc
 - Motion must indicate fresh sampling rather than numeric change alone.
 - Color must encode state consistently enough to remain meaningful at reduced scale.
 - Dimensional styling must not imply liveness or condition independently of the state machine.
+- Sample-driven carriers must not free-run between authoritative samples.
+- Repeated diagnostic copies of one condition must not inflate the apparent alarm count.
 
 ## 8. Layering rule
 
-The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, and derive visual state, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
+The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, derive visual state, and bind motion to already-rendered sample events, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
 
-The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, and `dashboard/material.css`, with `material.css` loaded last so dimensional styling can refine the approved instrument surfaces. The shared state behavior contract is defined in `dashboard/instrument_state.js`; production instruments migrate to it incrementally so visual work does not destabilize the collector.
+The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, `dashboard/material.css`, `dashboard/spotlight.js`, and `dashboard/motion.js`. The shared state behavior contract is defined in `dashboard/instrument_state.js`; production instruments migrate to it incrementally so visual work does not destabilize the collector.
