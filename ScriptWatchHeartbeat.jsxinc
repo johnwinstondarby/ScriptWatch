@@ -1,0 +1,230 @@
+/**
+ * ScriptWatchHeartbeat.jsxinc
+ * ---------------------------
+ * Publishes a small JSON heartbeat so an out-of-process monitor (scriptwatch.py)
+ * can report job progress alongside Windows process telemetry.
+ *
+ * Design rules:
+ *   - The heartbeat must never be able to kill the job. Every public call is
+ *     wrapped in try/catch and fails silently.
+ *   - Writes are throttled by target count and by wall clock, so a 2,883-target
+ *     sweep costs a few hundred tiny file writes, not thousands.
+ *   - Writes are swapped into place through a temp file, so a monitor read that
+ *     lands mid-write sees the previous complete file rather than half of one.
+ *
+ * Include from a job script:
+ *   #include "ScriptWatchHeartbeat.jsxinc"
+ *
+ * Minimal wiring:
+ *   ScriptWatch.start({ job: "NormalFix Read-Only Sweep", total: targets.length });
+ *   for (var i = 0; i < targets.length; i++) {
+ *       var ok = processTarget(targets[i]);
+ *       ScriptWatch.tick({ target: i + 1, ok: ok });
+ *       if ((i + 1) % 25 === 0) { ScriptWatch.checkpoint(i + 1, true); }  // true = $.gc()
+ *   }
+ *   ScriptWatch.finish("DONE");
+ *
+ * ExtendScript is ES3: var only, no JSON object, no array extras.
+ */
+
+// eslint-disable-next-line no-unused-vars
+var ScriptWatch = (function () {
+
+    var S = {
+        job: "ExtendScript Job",
+        path: null,
+        tmpPath: null,
+        total: 0,
+        target: 0,
+        startTarget: 0,
+        pass: 0,
+        fail: 0,
+        lastCheckpoint: 0,
+        note: "",
+        status: "STARTING",
+        startMs: 0,
+        lastWriteMs: 0,
+        lastWriteTarget: -1,
+        everyTargets: 5,
+        everyMs: 10000,
+        writes: 0,
+        enabled: true
+    };
+
+    // ---------------------------------------------------------------- utils
+
+    function slug(text) {
+        return String(text).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+    }
+
+    function pad(n, width) {
+        var s = String(n);
+        while (s.length < width) { s = "0" + s; }
+        return s;
+    }
+
+    function stamp(date) {
+        return date.getFullYear() + "-" + pad(date.getMonth() + 1, 2) + "-" +
+               pad(date.getDate(), 2) + "T" + pad(date.getHours(), 2) + ":" +
+               pad(date.getMinutes(), 2) + ":" + pad(date.getSeconds(), 2);
+    }
+
+    function esc(text) {
+        var out = String(text);
+        out = out.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        out = out.replace(/[\r\n\t]/g, " ");
+        return out;
+    }
+
+    function defaultFolder() {
+        var dir = new Folder(Folder.temp.fsName + "/ScriptWatch");
+        if (!dir.exists) { dir.create(); }
+        return dir;
+    }
+
+    // -------------------------------------------------------------- payload
+
+    function serialize() {
+        var elapsed = (new Date().getTime() - S.startMs) / 1000;
+        var done = S.target - S.startTarget;
+        var avg = done > 0 ? Math.round((elapsed * 1000) / done) : 0;
+        var lines = [];
+        lines.push('  "job": "' + esc(S.job) + '"');
+        lines.push('  "status": "' + esc(S.status) + '"');
+        lines.push('  "target": ' + S.target);
+        lines.push('  "total": ' + S.total);
+        lines.push('  "pass": ' + S.pass);
+        lines.push('  "fail": ' + S.fail);
+        lines.push('  "elapsedSeconds": ' + Math.round(elapsed));
+        lines.push('  "averageTargetMs": ' + avg);
+        lines.push('  "lastCheckpoint": ' + S.lastCheckpoint);
+        lines.push('  "writes": ' + S.writes);
+        lines.push('  "updated": "' + stamp(new Date()) + '"');
+        if (S.note) { lines.push('  "note": "' + esc(S.note) + '"'); }
+        return "{\n" + lines.join(",\n") + "\n}\n";
+    }
+
+    function flush() {
+        if (!S.enabled || !S.path) { return false; }
+        var tmp = new File(S.tmpPath);
+        tmp.encoding = "UTF-8";
+        tmp.lineFeed = "Unix";
+        if (!tmp.open("w")) { return false; }
+        tmp.write(serialize());
+        tmp.close();
+
+        var dst = new File(S.path);
+        if (dst.exists) { dst.remove(); }
+        tmp.rename(dst.name);
+
+        S.writes += 1;
+        S.lastWriteMs = new Date().getTime();
+        S.lastWriteTarget = S.target;
+        return true;
+    }
+
+    function due() {
+        if (S.lastWriteTarget < 0) { return true; }
+        if ((S.target - S.lastWriteTarget) >= S.everyTargets) { return true; }
+        return (new Date().getTime() - S.lastWriteMs) >= S.everyMs;
+    }
+
+    // --------------------------------------------------------------- public
+
+    var api = {};
+
+    /**
+     * opts: job, total, path, everyTargets, everyMs, startTarget, enabled
+     * Returns the resolved heartbeat path (also echoed to the ESTK console).
+     */
+    api.start = function (opts) {
+        try {
+            opts = opts || {};
+            if (opts.enabled === false) { S.enabled = false; }
+            S.job = opts.job || S.job;
+            S.total = opts.total || 0;
+            S.startTarget = opts.startTarget || 0;
+            S.target = S.startTarget;
+            S.lastCheckpoint = opts.startTarget || 0;
+            S.everyTargets = opts.everyTargets || S.everyTargets;
+            S.everyMs = opts.everyMs || S.everyMs;
+            S.startMs = new Date().getTime();
+            S.status = "RUNNING";
+            S.pass = opts.pass || 0;
+            S.fail = opts.fail || 0;
+
+            var file = opts.path ? new File(opts.path)
+                                 : new File(defaultFolder().fsName + "/" + slug(S.job) + ".json");
+            S.path = file.fsName;
+            S.tmpPath = file.fsName + ".tmp";
+            flush();
+            $.writeln("ScriptWatch heartbeat: " + S.path);
+        } catch (e) {
+            S.enabled = false;
+        }
+        return S.path;
+    };
+
+    /**
+     * opts: target (required), ok (true/false), pass, fail, note, force
+     * Pass either ok, or explicit pass/fail totals if the job tracks its own.
+     */
+    api.tick = function (opts) {
+        try {
+            if (!S.enabled) { return false; }
+            opts = opts || {};
+            if (typeof opts.target === "number") { S.target = opts.target; }
+            if (typeof opts.ok === "boolean") {
+                if (opts.ok) { S.pass += 1; } else { S.fail += 1; }
+            }
+            if (typeof opts.pass === "number") { S.pass = opts.pass; }
+            if (typeof opts.fail === "number") { S.fail = opts.fail; }
+            if (typeof opts.total === "number") { S.total = opts.total; }
+            if (opts.note !== undefined) { S.note = opts.note; }
+            if (opts.force || due()) { return flush(); }
+        } catch (e) {}
+        return false;
+    };
+
+    /**
+     * Records a durable checkpoint and forces an immediate write.
+     * Pass gc = true to run the ExtendScript collector at the same boundary,
+     * giving the pattern: heartbeat -> checkpoint -> $.gc() -> continue.
+     */
+    api.checkpoint = function (target, gc) {
+        try {
+            if (typeof target === "number") {
+                S.target = target;
+                S.lastCheckpoint = target;
+            } else {
+                S.lastCheckpoint = S.target;
+            }
+            flush();
+            if (gc) { $.gc(); $.gc(); }
+        } catch (e) {}
+        return S.lastCheckpoint;
+    };
+
+    /** Free-text state shown by the monitor on the next write. */
+    api.note = function (text, force) {
+        try {
+            S.note = text || "";
+            if (force) { flush(); }
+        } catch (e) {}
+    };
+
+    /** status: "DONE", "ABORTED", "ERROR". Always call this, including in catch. */
+    api.finish = function (status, note) {
+        try {
+            S.status = status || "DONE";
+            if (note !== undefined) { S.note = note; }
+            flush();
+        } catch (e) {}
+        return S.path;
+    };
+
+    /** Current state, for the job's own UI or logging. */
+    api.state = function () { return S; };
+
+    return api;
+})();
