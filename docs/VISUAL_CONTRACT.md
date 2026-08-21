@@ -38,7 +38,18 @@ The console exposes the acquisition architecture as a source bus:
 3. heartbeat telemetry;
 4. ScriptWatch Harness telemetry.
 
-Each source has its own lamp and state label. A process-only job can therefore show host/process as live, heartbeat as amber/no data, and Harness as neutral/not published.
+Each source has its own lamp and state label. A process-only job can therefore show host/process as live, heartbeat as amber/no data, and Harness as neutral/off.
+
+### 3.1 Explicit Harness state
+
+Harness participation is always visible as a binary operator indicator:
+
+- `HARNESS = ON` means the monitored script is publishing the ScriptWatch Harness contract;
+- `HARNESS = OFF` means ScriptWatch is observing the script through agentless process/host telemetry and any separately available raw heartbeat data.
+
+`OFF` is neutral/gray because a non-Harness script can still be observed correctly. It is not a fault. When a Harness-enabled job stops publishing fresh data, the indicator remains logically `ON` but changes to amber `DORMANT`. A known loss caused by process/dashboard failure uses red `FAULT`.
+
+The Harness version is shown with the ON state when available.
 
 ## 4. Instrument families
 
@@ -53,6 +64,18 @@ The visual layer uses a small reusable instrument vocabulary:
 
 Not every value earns a dial. Dense counters remain compact and readable.
 
+### 4.1 Counters by acquisition source
+
+Counter presentation preserves provenance. Counters are visually grouped into source bays rather than mixed into one undifferentiated bank.
+
+**Host counters** contain Windows/system values such as available RAM, commit headroom and peak, system cache, kernel pools, and system process/thread/handle totals.
+
+**InDesign process counters** contain values sampled from the monitored InDesign process such as private-memory delta, working set, I/O deltas, page faults, GDI/USER objects, threads, and handles.
+
+**Harness counters** contain only semantic values published by the monitored script through `ScriptWatchJob.metric()`. Harness counters live in their own Harness data bay and are shown only when `HARNESS = ON`. The bay remains conceptually separate from process/host counters because Harness data describes the work rather than the operating system process.
+
+Source identity and source health are separate visual dimensions. A host counter remains a host counter when its source goes dormant; its state changes to amber without changing provenance.
+
 ## 5. Truthfulness rules
 
 - A visual instrument must use an existing authoritative collector or Harness value.
@@ -60,6 +83,8 @@ Not every value earns a dial. Dense counters remain compact and readable.
 - Missing data is never displayed as zero.
 - Unsupported data is never remapped to a different counter.
 - Last-known values remain distinguishable from current values through source-state color.
+- Counter source labels must reflect the acquisition path that supplied the value.
+- Harness ON/OFF is derived from actual Harness provenance in the current job payload, not from user configuration or expectation.
 - Job failure and telemetry failure are separate. A failed job does not turn healthy process/host telemetry red.
 - Browser stale-sampler state and stale heartbeat state remain distinct concepts.
 
@@ -67,4 +92,4 @@ Not every value earns a dial. Dense counters remain compact and readable.
 
 The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM and derived visual state, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
 
-The current implementation is loaded through `dashboard/spotlight.css` and `dashboard/spotlight.js` after the existing dashboard assets so the original structure remains recoverable and reviewable.
+The current implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, and `dashboard/spotlight.js` after the existing dashboard assets so the original structure remains recoverable and reviewable.
