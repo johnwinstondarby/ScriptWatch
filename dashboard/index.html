@@ -76,6 +76,17 @@
           <div class="metric-card"><span>Throughput</span><strong id="rate-value">--</strong><small>targets/min</small></div>
         </div>
 
+        <div id="harness-card" class="job-detail instrument-card" hidden>
+          <div class="instrument-title"><span>ScriptWatch Harness</span><strong id="harness-version">--</strong></div>
+          <div class="signal-grid two">
+            <div class="signal-row"><span>Tool</span><b id="harness-tool">--</b></div>
+            <div class="signal-row"><span>Tool version</span><b id="harness-tool-version">--</b></div>
+            <div class="signal-row"><span>Mode</span><b id="harness-mode">--</b></div>
+            <div class="signal-row"><span>Heartbeat schema</span><b id="heartbeat-schema">--</b></div>
+          </div>
+          <div id="job-metric-bank" class="counter-bank"></div>
+        </div>
+
         <div class="instrument-card heartbeat-card">
           <div class="instrument-title"><span>Heartbeat</span><strong id="heartbeat-state">NO HEARTBEAT</strong></div>
           <div class="signal-grid">
