@@ -11,6 +11,9 @@
  *     sweep costs a few hundred tiny file writes, not thousands.
  *   - Writes are swapped into place through a temp file, so a monitor read that
  *     lands mid-write sees the previous complete file rather than half of one.
+ *   - Output lands in the DocStats directory, per suite convention. ExtendScript
+ *     cannot read its own process ID, so a lock file held open for the life of
+ *     the job lets the monitor identify the right InDesign instance instead.
  *
  * Include from a job script:
  *   #include "ScriptWatchHeartbeat.jsxinc"
@@ -48,7 +51,10 @@ var ScriptWatch = (function () {
         everyTargets: 5,
         everyMs: 10000,
         writes: 0,
-        enabled: true
+        enabled: true,
+        lockPath: null,
+        lockFile: null,
+        host: ""
     };
 
     // ---------------------------------------------------------------- utils
@@ -76,10 +82,40 @@ var ScriptWatch = (function () {
         return out;
     }
 
+    /**
+     * Runtime output convention: heartbeats and lock files live in the DocStats
+     * directory alongside the rest of the suite's runtime output. Edit
+     * DOCSTATS_DIR for a different machine, or pass an explicit path to start().
+     * Falls back to a ScriptWatch folder under temp only if DocStats is absent,
+     * so the heartbeat never fails to write.
+     */
+    var DOCSTATS_DIR = "D:/Recovery Community Dropbox/DARBY FAMILY/" +
+                       "!!!New Business 2025/AI Ecosystem/DocStats";
+
     function defaultFolder() {
-        var dir = new Folder(Folder.temp.fsName + "/ScriptWatch");
+        var dir = new Folder(DOCSTATS_DIR);
+        if (dir.exists) { return dir; }
+        dir = new Folder(Folder.temp.fsName + "/ScriptWatch");
         if (!dir.exists) { dir.create(); }
         return dir;
+    }
+
+    /**
+     * ExtendScript cannot read the host process ID, so the job instead holds a
+     * small lock file open for its lifetime. The monitor matches that open
+     * handle to a process when more than one InDesign instance is running.
+     * The handle is released by finish(), or by InDesign exiting.
+     */
+    function openLock(path) {
+        try {
+            var lock = new File(path);
+            lock.encoding = "UTF-8";
+            if (!lock.open("w")) { return null; }
+            lock.write("ScriptWatch lock " + stamp(new Date()) + "\n");
+            return lock;
+        } catch (e) {
+            return null;
+        }
     }
 
     // -------------------------------------------------------------- payload
@@ -100,6 +136,8 @@ var ScriptWatch = (function () {
         lines.push('  "lastCheckpoint": ' + S.lastCheckpoint);
         lines.push('  "writes": ' + S.writes);
         lines.push('  "updated": "' + stamp(new Date()) + '"');
+        if (S.lockPath) { lines.push('  "lock": "' + esc(S.lockPath) + '"'); }
+        if (S.host) { lines.push('  "host": "' + esc(S.host) + '"'); }
         if (S.note) { lines.push('  "note": "' + esc(S.note) + '"'); }
         return "{\n" + lines.join(",\n") + "\n}\n";
     }
@@ -157,6 +195,9 @@ var ScriptWatch = (function () {
                                  : new File(defaultFolder().fsName + "/" + slug(S.job) + ".json");
             S.path = file.fsName;
             S.tmpPath = file.fsName + ".tmp";
+            S.lockPath = file.fsName.replace(/\.json$/i, "") + ".lock";
+            S.lockFile = openLock(S.lockPath);
+            try { S.host = $.getenv("COMPUTERNAME") || ""; } catch (eh) { S.host = ""; }
             flush();
             $.writeln("ScriptWatch heartbeat: " + S.path);
         } catch (e) {
@@ -219,6 +260,10 @@ var ScriptWatch = (function () {
             S.status = status || "DONE";
             if (note !== undefined) { S.note = note; }
             flush();
+            if (S.lockFile) {
+                try { S.lockFile.close(); S.lockFile.remove(); } catch (eL) {}
+                S.lockFile = null;
+            }
         } catch (e) {}
         return S.path;
     };

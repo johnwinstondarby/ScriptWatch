@@ -19,13 +19,21 @@ in process-only mode.
 Usage
 -----
     python scriptwatch.py                              # auto-attach to InDesign
-    python scriptwatch.py --heartbeat C:\\SW\\nf.json
+    python scriptwatch.py --dir "D:\\...\\DocStats"
     python scriptwatch.py --pid 12345 --interval 5
     python scriptwatch.py --once                       # one snapshot, no loop
-    python scriptwatch.py --report run-20260820.csv    # post-run analysis
+    python scriptwatch.py --report ScriptWatch_NormalFix.csv
+
+Runtime output convention: heartbeats and sample logs live in the DocStats
+directory (see DOCSTATS_DIR), not %TEMP%. Both --dir and --heartbeat/--csv
+override it.
 
 Every sample is appended to a CSV so the memory question can be answered
 empirically after the fact instead of inferred from throughput.
+
+Memory fields: private_mb is the trend and alert metric on both backends.
+working_mb and pagefile_mb are informational, and pagefile_mb is not the same
+counter on both backends. See PsutilProbe and PowerShellProbe.
 
 Backends: psutil if installed, otherwise PowerShell (Get-Process). No admin
 rights required for either.
@@ -58,6 +66,20 @@ MB = 1024.0 * 1024.0
 
 IS_WINDOWS = os.name == "nt"
 
+# Suite convention: runtime output (heartbeats, lock files, sample logs) lives in
+# the DocStats directory, not %TEMP%. Override with --dir or SCRIPTWATCH_DIR.
+# If no candidate exists, fall back to the working directory.
+DOCSTATS_DIR = (r"D:\Recovery Community Dropbox\DARBY FAMILY"
+                r"\!!!New Business 2025\AI Ecosystem\DocStats")
+
+
+def resolve_dir(explicit=None):
+    for candidate in (explicit, os.environ.get("SCRIPTWATCH_DIR"), DOCSTATS_DIR):
+        if candidate and os.path.isdir(candidate):
+            return candidate
+    return os.getcwd()
+
+
 try:
     import psutil  # type: ignore
 except ImportError:  # pragma: no cover - environment dependent
@@ -82,6 +104,11 @@ def now():
 
 def iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def slugify(text):
+    out = "".join(c if (c.isalnum() or c in "._-") else "-" for c in str(text))
+    return out.strip("-") or "job"
 
 
 def slope_per_hour(points):
@@ -119,6 +146,30 @@ def enable_ansi():
 # --------------------------------------------------------------------------
 # Heartbeat reader
 # --------------------------------------------------------------------------
+
+def discover_heartbeat(directory):
+    """Newest *.json in `directory` that parses and looks like a heartbeat."""
+    best, best_mtime = None, -1.0
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return None
+    for name in names:
+        if not name.lower().endswith(".json"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            mtime = os.path.getmtime(path)
+            if mtime <= best_mtime:
+                continue
+            with open(path, "r", encoding="utf-8-sig") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict) and "job" in data and "target" in data:
+                best, best_mtime = path, mtime
+        except Exception:
+            continue
+    return best
+
 
 class Heartbeat(object):
     """
@@ -204,16 +255,24 @@ class PsutilProbe(Probe):
         self.proc.cpu_percent(None)  # prime the CPU delta
 
     def sample(self):
+        """
+        private_mb  = PROCESS_MEMORY_COUNTERS_EX.PrivateUsage, the Private Bytes
+                      counter. This is the trend and alert metric.
+        working_mb  = WorkingSetSize. Informational only: it falls when the OS
+                      trims the working set, with nothing actually released.
+        pagefile_mb = PagefileUsage. Informational only, and NOT the same counter
+                      the PowerShell backend reports (see PowerShellProbe).
+        """
         try:
             with self.proc.oneshot():
                 mi = self.proc.memory_info()
                 private = getattr(mi, "private", None)
-                commit = getattr(mi, "pagefile", None)
+                pagefile = getattr(mi, "pagefile", None)
                 return {
                     "cpu": self.proc.cpu_percent(None) / float(self.cores),
                     "working_mb": mi.rss / MB,
                     "private_mb": (private if private is not None else mi.vms) / MB,
-                    "commit_mb": (commit if commit is not None else mi.vms) / MB,
+                    "pagefile_mb": (pagefile if pagefile is not None else mi.vms) / MB,
                     "threads": self.proc.num_threads(),
                     "handles": (self.proc.num_handles()
                                 if hasattr(self.proc, "num_handles") else None),
@@ -223,11 +282,23 @@ class PsutilProbe(Probe):
 
 
 class PowerShellProbe(Probe):
-    """Fallback for machines where psutil is not installed."""
+    """
+    Fallback for machines where psutil is not installed.
+
+    private_mb  = PrivateMemorySize64, which Microsoft defines as memory
+                  allocated to the process that cannot be shared with other
+                  processes, equivalent to the Private Bytes counter. Same
+                  meaning as the psutil backend's private_mb, so trends and
+                  alerts are comparable across backends.
+    pagefile_mb = PagedMemorySize64, which Microsoft describes as memory that
+                  can be written to the paging file. This is a different counter
+                  from the psutil backend's pagefile_mb, so treat the column as
+                  informational and backend-local. Never trend or alert on it.
+    """
 
     PS = ("$ErrorActionPreference='Stop';$p=Get-Process -Id {pid};"
           "[pscustomobject]@{{ws=$p.WorkingSet64;priv=$p.PrivateMemorySize64;"
-          "commit=$p.PagedMemorySize64;threads=@($p.Threads).Count;"
+          "paged=$p.PagedMemorySize64;threads=@($p.Threads).Count;"
           "handles=$p.HandleCount;cpu=$p.TotalProcessorTime.TotalSeconds;"
           "start=(Get-Date $p.StartTime -UFormat %s)}}|ConvertTo-Json -Compress")
 
@@ -268,38 +339,64 @@ class PowerShellProbe(Probe):
             "cpu": cpu_pct,
             "working_mb": float(raw["ws"]) / MB,
             "private_mb": float(raw["priv"]) / MB,
-            "commit_mb": float(raw["commit"]) / MB,
+            "pagefile_mb": float(raw["paged"]) / MB,
             "threads": int(raw["threads"]),
             "handles": int(raw["handles"]),
         }
 
 
-def find_process(name_fragment):
-    """Return the PID of the largest matching process, or None."""
+def find_processes(name_fragment):
+    """All matching processes as (pid, working_set_bytes), largest first."""
     fragment = name_fragment.lower()
+    found = []
     if psutil is not None:
-        best, best_rss = None, -1
         for proc in psutil.process_iter(["pid", "name", "memory_info"]):
             try:
-                pname = (proc.info["name"] or "").lower()
-                if fragment in pname:
-                    rss = proc.info["memory_info"].rss if proc.info["memory_info"] else 0
-                    if rss > best_rss:
-                        best, best_rss = proc.info["pid"], rss
+                if fragment in (proc.info["name"] or "").lower():
+                    mi = proc.info["memory_info"]
+                    found.append((proc.info["pid"], mi.rss if mi else 0))
             except Exception:
                 continue
-        return best
-    if IS_WINDOWS:
+    elif IS_WINDOWS:
         try:
             out = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                 "(Get-Process -Name '*%s*' | Sort-Object WorkingSet64 -Descending |"
-                 " Select-Object -First 1).Id" % name_fragment],
+                 "Get-Process -Name '*%s*' -ErrorAction SilentlyContinue |"
+                 " ForEach-Object { \"$($_.Id) $($_.WorkingSet64)\" }" % name_fragment],
                 capture_output=True, text=True, timeout=20)
-            value = out.stdout.strip()
-            return int(value) if value.isdigit() else None
+            for line in out.stdout.splitlines():
+                bits = line.split()
+                if len(bits) == 2 and bits[0].isdigit():
+                    found.append((int(bits[0]), int(bits[1])))
         except Exception:
-            return None
+            pass
+    found.sort(key=lambda pair: pair[1], reverse=True)
+    return found
+
+
+def pid_holding(path, candidates):
+    """
+    Best-effort: which candidate PID holds `path` open?
+
+    The ExtendScript side cannot read its own PID, so instead it keeps a small
+    lock file open for the life of the job. Matching that open handle to a
+    process identifies the right InDesign instance when several are running.
+    Returns None if the answer cannot be determined; the caller then falls back
+    to working set and warns.
+    """
+    if psutil is None or not path:
+        return None
+    try:
+        target = os.path.normcase(os.path.abspath(path))
+    except Exception:
+        return None
+    for pid in candidates:
+        try:
+            for handle in psutil.Process(pid).open_files():
+                if os.path.normcase(os.path.abspath(handle.path)) == target:
+                    return pid
+        except Exception:
+            continue
     return None
 
 
@@ -329,7 +426,7 @@ def is_responding(pid):
 # --------------------------------------------------------------------------
 
 CSV_COLUMNS = ["iso", "epoch", "pid", "cpu_pct", "working_mb", "private_mb",
-               "commit_mb", "threads", "handles", "responding", "job", "target",
+               "pagefile_mb", "threads", "handles", "responding", "job", "target",
                "total", "passed", "failed", "checkpoint", "hb_age_s",
                "rate_per_min", "eta_s", "watch_bytes"]
 
@@ -337,9 +434,11 @@ CSV_COLUMNS = ["iso", "epoch", "pid", "cpu_pct", "working_mb", "private_mb",
 class Monitor(object):
     def __init__(self, args):
         self.args = args
-        self.hb = Heartbeat(args.heartbeat)
+        self.dir = resolve_dir(args.dir)
+        self.warnings = []
+        self.hb = Heartbeat(args.heartbeat or discover_heartbeat(self.dir))
         self.hb.poll()
-        self.pid = args.pid or self.hb.data.get("pid") or find_process(args.process)
+        self.pid = args.pid or self.hb.data.get("pid") or self._choose_pid()
         if not self.pid:
             raise SystemExit("No process matching '%s' found. Pass --pid, or start "
                              "InDesign first." % args.process)
@@ -349,8 +448,28 @@ class Monitor(object):
         self.started = now()
         self.samples = 0
         self.peak_private = 0.0
-        self.csv_path = args.csv or "scriptwatch-%s.csv" % datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.csv_path = args.csv or os.path.join(
+            self.dir, "ScriptWatch_%s_%s.csv"
+            % (slugify(self.hb.get("job") or args.process),
+               datetime.now().strftime("%Y%m%d-%H%M%S")))
         self._init_csv()
+
+    def _choose_pid(self):
+        found = find_processes(self.args.process)
+        if not found:
+            return None
+        if len(found) > 1:
+            pids = [pid for pid, _ in found]
+            holder = pid_holding(self.hb.get("lock"), pids)
+            if holder:
+                self.warnings.append(
+                    "%d %s instances running; matched pid %d by heartbeat lock file"
+                    % (len(found), self.args.process, holder))
+                return holder
+            self.warnings.append(
+                "%d %s instances running; attached to pid %d by working set. "
+                "Use --pid to be certain." % (len(found), self.args.process, pids[0]))
+        return found[0][0]
 
     def _make_probe(self, pid):
         if psutil is not None:
@@ -441,7 +560,7 @@ class Monitor(object):
                        % ((1 - ratio) * 100))
         if self.hb.parse_errors > 5:
             out.append("%d heartbeat parse failures" % self.hb.parse_errors)
-        return out
+        return self.warnings + out
 
     # -- main loop ---------------------------------------------------------
     def tick(self):
@@ -473,7 +592,7 @@ class Monitor(object):
         self.csv.writerow([
             iso(stamp), round(stamp, 2), self.pid, round(proc["cpu"], 2),
             round(proc["working_mb"], 1), round(proc["private_mb"], 1),
-            round(proc["commit_mb"], 1), proc["threads"], proc["handles"],
+            round(proc["pagefile_mb"], 1), proc["threads"], proc["handles"],
             "" if responding is None else int(responding),
             self.hb.get("job", ""), self.hb.get("target", ""), self.hb.get("total", ""),
             self.hb.get("pass", ""), self.hb.get("fail", ""), self.hb.get("lastCheckpoint", ""),
@@ -521,7 +640,7 @@ class Monitor(object):
         L.append("CPU           %5.1f %%" % proc["cpu"])
         L.append("Private MB    %8.1f   (peak %.1f)" % (proc["private_mb"], self.peak_private))
         L.append("Working MB    %8.1f" % proc["working_mb"])
-        L.append("Commit MB     %8.1f" % proc["commit_mb"])
+        L.append("Pagefile MB   %8.1f" % proc["pagefile_mb"])
         L.append("Threads       %8s" % proc["threads"])
         L.append("Handles       %8s" % (proc["handles"] if proc["handles"] is not None else "n/a"))
         if snap["responding"] is not None:
@@ -541,8 +660,10 @@ class Monitor(object):
         for alert in self.alerts(mem_slope, trend, ratio):
             L.append("  !  %s" % alert)
         L.append("")
-        L.append("log: %s   samples: %d   %s"
-                 % (self.csv_path, self.samples, datetime.now().strftime("%H:%M:%S")))
+        if self.hb.path:
+            L.append("heartbeat: %s" % self.hb.path)
+        L.append("log: %s" % self.csv_path)
+        L.append("samples: %d   %s" % (self.samples, datetime.now().strftime("%H:%M:%S")))
         return L
 
     def run(self):
@@ -626,8 +747,13 @@ def report(path, stall_seconds):
           % (hms(max(ages) if ages else None), stalls))
     handles = [num(r, "handles") for r in rows if num(r, "handles")]
     if handles:
-        print("Handles          start %d   end %d   peak %d"
-              % (handles[0], handles[-1], max(handles)))
+        print("Handles          start %d   end %d   peak %d   delta %+d"
+              % (handles[0], handles[-1], max(handles), handles[-1] - handles[0]))
+        if handles[-1] - handles[0] > 200:
+            print("                 (rising handle count indicates leaked OS resources -")
+            print("                  files, events, sections, registry keys. It is a")
+            print("                  separate question from private-memory growth, which")
+            print("                  can rise from script-side retention alone.)")
     return 0
 
 
@@ -639,8 +765,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="scriptwatch",
         description="External runtime monitor for InDesign ExtendScript jobs.")
+    ap.add_argument("--dir", "-d", help="runtime directory for heartbeat discovery and "
+                                        "the sample log (default: DocStats, or "
+                                        "SCRIPTWATCH_DIR, or the working directory)")
     ap.add_argument("--heartbeat", "-b", default=os.environ.get("SCRIPTWATCH_HEARTBEAT"),
-                    help="path to the JSON heartbeat written by the job")
+                    help="path to the JSON heartbeat written by the job "
+                         "(default: newest valid heartbeat in the runtime directory)")
     ap.add_argument("--pid", type=int, help="attach to this PID instead of searching")
     ap.add_argument("--process", default=DEFAULT_PROCESS,
                     help="process name fragment to match (default: InDesign)")
