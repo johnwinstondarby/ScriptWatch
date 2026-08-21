@@ -154,6 +154,29 @@ Color hierarchy is intentionally narrow:
 
 Source identity colors must not compete with state colors on primary value instruments. State has visual priority.
 
+### 5.1 Dimensional material rendering
+
+ScriptWatch uses dimensional rendering to improve visual quality without adding another semantic channel.
+
+**Hue carries condition. Shading carries form. Motion carries liveness.**
+
+A state color may be rendered as a tonal family of the same hue using gradients, highlights, shadows, bevels, reflections, and glow. Those effects may make an instrument appear illuminated, recessed, glass-covered, or machined, but they must not introduce a competing state color.
+
+The material rules are:
+
+1. a green live instrument may use dark green, nominal green, bright green, and pale green specular highlights, but it remains unambiguously green;
+2. amber, orange, red, and gray instruments receive the same dimensional treatment within their own hue families;
+3. static glow, shading, or reflection never proves liveness; only the activity carrier does;
+4. `DORMANT`, `FAULT`, and `NEVER_SAMPLED` stop their activity carriers even though dimensional shading remains visible;
+5. `AT_LIMIT` keeps its activity carrier moving because the source is still live;
+6. material effects remain subordinate to the source/state hierarchy and cannot obscure text or reduce contrast;
+7. the chassis remains relatively restrained so illuminated telemetry instruments carry the visual attention;
+8. close-range material detail may disappear at NOC distance without weakening the motion-and-color signals.
+
+The target is modern instrument glass and illuminated controls rather than decorative beveling across the entire interface.
+
+The runtime material layer lives in `dashboard/material.css`. It is presentation-only and may add liveness carriers that are already authorized by the state contract, but it does not redefine state, thresholds, source provenance, or collector values.
+
 ## 6. Instrument workbench and specimen-strip gate
 
 `dashboard/workbench.html` is the permanent no-backend visual canary for ScriptWatch instruments. It runs with a synthetic driver and does not require InDesign or a ScriptWatch process.
@@ -169,7 +192,8 @@ The specimen-strip gate checks at least these distinctions:
 5. reduced-motion mode preserves state meaning without animation;
 6. source/capability labels remain truthful without backend data;
 7. an unchanged live value still carries visible liveness motion;
-8. the same instrument remains classifiable by state when viewed at reduced scale or from NOC distance.
+8. the same instrument remains classifiable by state when viewed at reduced scale or from NOC distance;
+9. dimensional material rendering improves close-range quality without weakening the semantic hue or liveness carrier.
 
 The workbench also carries a fake Host → Process → Heartbeat → Harness rig so flow behavior can be reviewed without changing production telemetry code.
 
@@ -190,9 +214,10 @@ A future tiled-console specimen may present multiple compact ScriptWatch instanc
 - Counter placement may change for readability, but source ownership and metric meaning do not.
 - Motion must indicate fresh sampling rather than numeric change alone.
 - Color must encode state consistently enough to remain meaningful at reduced scale.
+- Dimensional styling must not imply liveness or condition independently of the state machine.
 
 ## 8. Layering rule
 
 The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, and derive visual state, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
 
-The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, and `dashboard/spotlight.js`. The shared state behavior contract is defined in `dashboard/instrument_state.js`; production instruments migrate to it incrementally so visual work does not destabilize the collector.
+The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, and `dashboard/material.css`, with `material.css` loaded last so dimensional styling can refine the approved instrument surfaces. The shared state behavior contract is defined in `dashboard/instrument_state.js`; production instruments migrate to it incrementally so visual work does not destabilize the collector.
