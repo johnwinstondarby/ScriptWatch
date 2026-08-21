@@ -1,9 +1,9 @@
 /*
-ScriptWatch dimensional material layer v0.1.0
+ScriptWatch dimensional material layer v0.2.0
 
 Presentation-only layer. Hue remains semantic. Shading, highlights, bevels,
 reflections, and glow add physical depth without introducing new state colors.
-Motion remains the liveness channel.
+Motion remains the liveness channel and is driven by rendered sample arrival.
 */
 
 :root {
@@ -13,6 +13,7 @@ Motion remains the liveness channel.
   --sw-mat-recess: rgba(0,0,0,.46);
   --sw-mat-glass: rgba(210,240,255,.055);
   --sw-mat-edge: rgba(190,225,240,.12);
+  --sw-sample-duration: 1400ms;
 }
 
 /* Modern dark-metal chassis. Instrument depth lives in the controls. */
@@ -125,19 +126,15 @@ Motion remains the liveness channel.
   box-shadow: 0 0 8px color-mix(in srgb, var(--source-color) 55%, transparent), 0 1px 2px rgba(0,0,0,.72);
 }
 
-.source-node.state-live:not(:last-child)::before,
-.source-node.state-limit:not(:last-child)::before {
-  opacity: .9;
-  animation: swMaterialPacket 2.2s linear infinite;
-}
-
 @keyframes swMaterialPacket {
-  from { transform: translateX(-56px); }
-  to { transform: translateX(14px); }
+  0% { transform: translateX(-58px); opacity: 0; }
+  9% { opacity: .95; }
+  82% { opacity: .88; }
+  100% { transform: translateX(15px); opacity: 0; }
 }
 
-/* Counter cells gain an independent liveness runner. Numeric change is not
-   required for the counter to look alive. */
+/* Counter cells gain a narrow liveness slug. The recessed rail stays dark;
+   only the sample-driven slug is bright. */
 .counter-card {
   overflow: hidden;
   background-image:
@@ -154,35 +151,30 @@ Motion remains the liveness channel.
   content: "";
   position: absolute;
   left: 7px;
-  right: 7px;
   bottom: 4px;
+  width: 28%;
   height: 3px;
-  border-radius: 3px;
+  border-radius: 4px;
   opacity: 0;
   background:
-    linear-gradient(180deg, rgba(255,255,255,.50), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,.62), transparent 48%),
     linear-gradient(90deg,
-      transparent 0 6%,
-      color-mix(in srgb, var(--counter-state) 36%, #05090b) 14%,
-      var(--counter-state) 40%,
-      color-mix(in srgb, var(--counter-state) 62%, #fff) 50%,
-      var(--counter-state) 60%,
-      color-mix(in srgb, var(--counter-state) 30%, #05090b) 86%,
-      transparent 94%);
-  box-shadow: 0 0 7px color-mix(in srgb, var(--counter-state) 48%, transparent);
-  transform: translateX(-115%);
-}
-
-.counter-card.state-live::after,
-.counter-card.state-limit::after {
-  opacity: .82;
-  animation: swCounterRunner 2.6s ease-in-out infinite;
+      transparent 0,
+      color-mix(in srgb, var(--counter-state) 30%, #05090b) 16%,
+      var(--counter-state) 38%,
+      color-mix(in srgb, var(--counter-state) 66%, #fff) 50%,
+      var(--counter-state) 62%,
+      color-mix(in srgb, var(--counter-state) 26%, #05090b) 84%,
+      transparent 100%);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--counter-state) 52%, transparent);
+  transform: translateX(-145%);
 }
 
 @keyframes swCounterRunner {
-  0% { transform: translateX(-115%); }
-  46%, 54% { transform: translateX(0%); }
-  100% { transform: translateX(115%); }
+  0% { transform: translateX(-145%); opacity: 0; }
+  8% { opacity: .92; }
+  78% { opacity: .88; }
+  100% { transform: translateX(355%); opacity: 0; }
 }
 
 .counter-card strong {
@@ -205,6 +197,7 @@ Motion remains the liveness channel.
   overflow: hidden;
   border-top: 1px solid color-mix(in srgb, var(--meter-color) 72%, #fff);
   background:
+    repeating-linear-gradient(to top, transparent 0 4px, rgba(0,0,0,.16) 4px 5px),
     linear-gradient(90deg, color-mix(in srgb, var(--meter-color) 45%, #020807), var(--meter-color) 45%, color-mix(in srgb, var(--meter-color) 66%, #fff) 55%, var(--meter-color) 67%, color-mix(in srgb, var(--meter-color) 45%, #020807)) !important;
   box-shadow:
     inset 1px 0 1px rgba(255,255,255,.16),
@@ -217,22 +210,120 @@ Motion remains the liveness channel.
   position: absolute;
   left: 1px;
   right: 1px;
-  height: 9px;
-  bottom: -12px;
+  height: 8px;
+  bottom: -11px;
   opacity: 0;
-  background: linear-gradient(to top, transparent, rgba(255,255,255,.68), transparent);
+  background: linear-gradient(to top, transparent, rgba(255,255,255,.74), transparent);
   filter: blur(.2px);
 }
 
-.capacity-meter.state-live .capacity-fill::after,
-.capacity-meter.state-limit .capacity-fill::after {
-  opacity: .58;
-  animation: swMeterGlint 2.1s linear infinite;
+@keyframes swMeterGlint {
+  0% { transform: translateY(0); opacity: 0; }
+  12% { opacity: .64; }
+  78% { opacity: .52; }
+  100% { transform: translateY(-86px); opacity: 0; }
 }
 
-@keyframes swMeterGlint {
-  from { transform: translateY(0); }
-  to { transform: translateY(-86px); }
+/* Sample-driven carrier gate. These override the earlier Spotlight continuous
+   animations. One visual traverse corresponds to one fresh rendered sample. */
+.source-node.state-live .source-lamp,
+.source-node.state-limit .source-lamp,
+.source-node.state-dormant .source-lamp {
+  animation: none !important;
+}
+
+.source-node.state-live:not(:last-child)::before,
+.source-node.state-limit:not(:last-child)::before,
+.counter-card.state-live::after,
+.counter-card.state-limit::after,
+.capacity-meter.state-live .capacity-fill::after,
+.capacity-meter.state-limit .capacity-fill::after {
+  animation: none !important;
+  opacity: 0;
+}
+
+.source-node.sample-pulse.state-live:not(:last-child)::before,
+.source-node.sample-pulse.state-limit:not(:last-child)::before {
+  animation: swMaterialPacket var(--sw-sample-duration) linear 1 !important;
+}
+
+.counter-card.sample-pulse.state-live::after,
+.counter-card.sample-pulse.state-limit::after {
+  animation: swCounterRunner var(--sw-sample-duration) linear 1 !important;
+}
+
+.capacity-meter.sample-pulse.state-live .capacity-fill::after,
+.capacity-meter.sample-pulse.state-limit .capacity-fill::after {
+  animation: swMeterGlint var(--sw-sample-duration) linear 1 !important;
+}
+
+@keyframes swLampSample {
+  0% { filter: brightness(.8); }
+  32% { filter: brightness(1.45); }
+  100% { filter: brightness(1); }
+}
+.source-node.sample-pulse.state-live .source-lamp,
+.source-node.sample-pulse.state-limit .source-lamp {
+  animation: swLampSample min(620ms, var(--sw-sample-duration)) ease-out 1 !important;
+}
+
+/* Dials use app.js's sample-angle transition. Disable the free-running orbit
+   from spotlight.css and preserve the last angle when sampling stops. */
+.activity-ring.state-live::after,
+.activity-ring.state-limit::after {
+  animation: none !important;
+  transform: rotate(calc(var(--activity-angle) * 1deg)) !important;
+  transition: transform var(--sw-sample-duration) cubic-bezier(.2,.72,.25,1), opacity .2s ease !important;
+}
+.telemetry-stale .activity-ring::after,
+.telemetry-fault .activity-ring::after,
+.activity-ring.state-never::after,
+.activity-ring.state-dormant::after,
+.activity-ring.state-fault::after,
+.activity-ring.state-unsupported::after {
+  animation: none !important;
+  transform: rotate(calc(var(--activity-angle) * 1deg)) !important;
+}
+
+/* One condition, one primary annunciation. Heartbeat absence is owned by the
+   source-bus Heartbeat node; desk-level repetitions remain readable but quiet. */
+.heartbeat-absent #status-dot.no-heartbeat {
+  color: #65767d !important;
+  opacity: .62;
+  box-shadow: 0 0 6px currentColor !important;
+}
+.heartbeat-absent .status-text.status-no-heartbeat {
+  color: #8b9ba0 !important;
+  text-shadow: none !important;
+}
+.heartbeat-absent .process-only-banner,
+.heartbeat-absent .process-only-summary {
+  border-color: rgba(112,133,141,.24) !important;
+}
+.heartbeat-absent .process-only-banner {
+  background: rgba(112,133,141,.035) !important;
+}
+.heartbeat-absent .process-only-lamp {
+  color: #66767d !important;
+  background-color: #66767d !important;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.18), inset 0 -2px 3px rgba(0,0,0,.58), 0 1px 2px rgba(0,0,0,.65) !important;
+}
+.heartbeat-absent .process-only-banner strong,
+.heartbeat-absent .observer-note b {
+  color: #93a2a7 !important;
+}
+
+/* Historical lines are context, not alarm annunciators. */
+.sparkline.amber polyline,
+.sparkline.amber path,
+.sparkline.cyan polyline,
+.sparkline.cyan path {
+  stroke: #78a894 !important;
+  filter: drop-shadow(0 0 3px rgba(120,168,148,.28)) !important;
+}
+#memory-spark-card.unqualified .sparkline {
+  opacity: .62 !important;
+  filter: saturate(.76) !important;
 }
 
 /* Generic laboratory instruments used by workbench/liveness/wall specimens. */
@@ -314,13 +405,15 @@ Motion remains the liveness channel.
 
 /* Accessibility: preserve state semantics while removing continuous motion. */
 @media (prefers-reduced-motion: reduce) {
-  .source-node.state-live:not(:last-child)::before,
-  .source-node.state-limit:not(:last-child)::before,
-  .counter-card.state-live::after,
-  .counter-card.state-limit::after,
-  .capacity-meter.state-live .capacity-fill::after,
-  .capacity-meter.state-limit .capacity-fill::after {
+  .source-node.sample-pulse::before,
+  .counter-card.sample-pulse::after,
+  .capacity-meter.sample-pulse .capacity-fill::after,
+  .source-node.sample-pulse .source-lamp {
     animation: none !important;
+    opacity: .38 !important;
     transform: none !important;
+  }
+  .activity-ring::after {
+    transition: none !important;
   }
 }
