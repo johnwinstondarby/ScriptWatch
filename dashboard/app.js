@@ -172,10 +172,13 @@ function render(payload) {
   const memoryText = trends.memoryCollecting
     ? collectingText(trends)
     : `${trends.memorySlopeMbHour >= 0 ? "+" : ""}${num(trends.memorySlopeMbHour, 1)} MB/hr`;
-  $("memory-slope").textContent = memoryText;
-  $("memory-slope-foot").textContent = memoryText;
+  // Coverage is stated once, on the history card's head. The instrument and the
+  // card foot carry the reading itself, so the same fact is not repeated four
+  // times down one column.
+  $("memory-slope").textContent = trends.memoryCollecting ? "trend pending" : memoryText;
+  $("memory-slope-foot").textContent = trends.memoryCollecting ? "pending" : memoryText;
   $("memory-coverage").textContent = trends.memoryCollecting
-    ? `raw samples · ${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`
+    ? `${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`
     : `${duration(trends.coverageSeconds)} coverage`;
   $("memory-qualification").textContent = trends.memoryCollecting
     ? "raw samples · trend not yet qualified"
@@ -193,18 +196,37 @@ function render(payload) {
     ? "not sampled"
     : (proc.responding ? "responsive" : "blocked · expected during modal script");
 
-  const trend = trends.throughputCollecting ? "collecting…" : (trends.throughput || "stable");
+  // Without a heartbeat there is no throughput source at all, so the panel must
+  // not say "collecting" or count down a qualification floor it can never
+  // reach. That is a different state from a trend that is still warming up.
+  const trend = noHeartbeat
+    ? "unavailable"
+    : (trends.throughputCollecting ? "collecting…" : (trends.throughput || "stable"));
   $("throughput-trend").textContent = trend;
-  $("throughput-coverage").textContent = trends.throughputCollecting
-    ? `raw samples · ${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`
-    : `${duration(trends.coverageSeconds)} coverage`;
-  $("rate-qualification").textContent = trends.throughputCollecting
-    ? "raw samples · trend not yet qualified"
-    : "throughput trend · qualified";
-  $("rate-coverage").textContent = duration(trends.coverageSeconds);
-  setQualification($("rate-spark-card"), trends.throughputCollecting);
-  $("trend-arrow").textContent = trend === "rising" ? "↗" : trend === "falling" ? "↘" : "→";
-  $("trend-arrow").style.color = trend === "falling" ? "var(--amber)" : trend === "rising" ? "var(--green)" : "var(--cyan)";
+  $("throughput-coverage").textContent = noHeartbeat
+    ? "requires a job heartbeat"
+    : (trends.throughputCollecting
+      ? `${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`
+      : `${duration(trends.coverageSeconds)} coverage`);
+  $("rate-qualification").textContent = noHeartbeat
+    ? "no throughput source · this job publishes no heartbeat"
+    : (trends.throughputCollecting ? "raw samples · trend not yet qualified" : "throughput trend · qualified");
+  $("rate-coverage").textContent = noHeartbeat ? "--" : duration(trends.coverageSeconds);
+
+  const rateCard = $("rate-spark-card");
+  rateCard.classList.toggle("unavailable", noHeartbeat);
+  if (noHeartbeat) {
+    rateCard.classList.remove("qualified", "unqualified");
+  } else {
+    setQualification(rateCard, trends.throughputCollecting);
+  }
+  const trendBanner = $("throughput-trend").closest(".trend-banner");
+  if (trendBanner) trendBanner.classList.toggle("unavailable", noHeartbeat);
+
+  $("trend-arrow").textContent = noHeartbeat ? "·" : (trend === "rising" ? "↗" : trend === "falling" ? "↘" : "→");
+  $("trend-arrow").style.color = noHeartbeat
+    ? "var(--muted)"
+    : (trend === "falling" ? "var(--amber)" : trend === "rising" ? "var(--green)" : "var(--cyan)");
   $("rate-now").textContent = `${num(job.ratePerMin, 2)} tgt/min`;
   $("handles-now").textContent = integer(proc.handles);
 

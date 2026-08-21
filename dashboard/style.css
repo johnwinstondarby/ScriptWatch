@@ -182,6 +182,9 @@ h1 { margin: 3px 0 0; font-size: 19px; font-weight: 650; letter-spacing: .01em; 
 .spark-card.unqualified .sparkline { opacity: .34; filter: saturate(.55); }
 .spark-card.unqualified .spark-foot span { color: var(--amber); }
 .spark-card.qualified .sparkline { opacity: 1; }
+.spark-card.unavailable .sparkline { opacity: .16; filter: grayscale(1); }
+.spark-card.unavailable .spark-foot span, .spark-card.unavailable .spark-head strong { color: var(--muted); }
+.trend-banner.unavailable strong { color: var(--muted); }
 .trend-banner { padding: 9px 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; min-height: 70px; }
 .trend-banner span { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .075em; }
 .trend-banner strong { display: block; margin-top: 3px; font-size: 16px; text-transform: capitalize; }
@@ -204,7 +207,7 @@ h1 { margin: 3px 0 0; font-size: 19px; font-weight: 650; letter-spacing: .01em; 
 .observer-note span { color: var(--muted); }
 .observer-note b { color: var(--amber); font-family: Consolas, monospace; text-align: right; }
 #job-panel.process-only .job-detail { display: none; }
-#job-panel.process-only .heartbeat-card { margin-top: 0; }
+#job-panel.process-only .heartbeat-card { display: none; }
 .footerbar { min-height: 32px; border-top: 1px solid var(--line); padding: 7px 12px; display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font: 9px Consolas, monospace; }
 @media (max-width: 1180px) {
   .dashboard-grid { grid-template-columns: 1fr; }
