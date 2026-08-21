@@ -3,22 +3,10 @@
 ScriptWatch browser dashboard
 =============================
 
-A local, dependency-free HTTP dashboard for ScriptWatch. It reuses the existing
-scriptwatch.py Monitor collector, so browser mode records the same CSV telemetry
-and applies the same heartbeat, PID-selection, memory-trend, and alert logic.
-
-The browser layer adds host-level memory telemetry for visualization. On Windows
-that comes from GetPerformanceInfo, a fast in-process API that exposes physical
-memory, commit, and global process/thread/handle counters without another
-PowerShell subprocess. Process/job values still come from Monitor.snapshot().
-
-Run:
-    python scriptwatch_web.py
-    python scriptwatch_web.py --pid 12345
-    python scriptwatch_web.py --heartbeat "D:\\...\\NormalFix.json"
-
-The server binds to 127.0.0.1 by default and opens the dashboard in the default
-browser. No network service is exposed unless --host is explicitly changed.
+Dependency-free local HTTP dashboard for ScriptWatch. The web layer consumes
+Monitor.snapshot() as the single telemetry contract. Process counters, host
+memory/commit counters, heartbeat provenance, and Harness metrics are sampled
+and persisted by scriptwatch.py before they reach the browser.
 """
 
 from __future__ import annotations
@@ -39,11 +27,9 @@ from urllib.parse import urlparse
 
 import scriptwatch
 
-
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-DEFAULT_HISTORY_POINTS = 360  # 30 minutes at the default five-second interval
-MB = 1024.0 * 1024.0
+DEFAULT_HISTORY_POINTS = 360
 
 
 def _safe_float(value):
@@ -64,112 +50,24 @@ def _safe_int(value):
         return None
 
 
-def _system_memory_sample():
-    """
-    Return host memory/commit counters without affecting the observed process.
-
-    Windows uses GetPerformanceInfo from psapi.dll. Its counters are system-wide
-    page counts, so physical and commit percentages have real denominators.
-    On non-Windows systems, psutil supplies physical RAM when available; commit
-    fields remain None rather than being mapped to a different concept.
-    """
-    empty = {
-        "physicalTotalMb": None,
-        "physicalAvailableMb": None,
-        "physicalUsedMb": None,
-        "physicalUsedPct": None,
-        "commitMb": None,
-        "commitLimitMb": None,
-        "commitPct": None,
-        "commitPeakMb": None,
-        "systemCacheMb": None,
-        "kernelPagedMb": None,
-        "kernelNonpagedMb": None,
-        "processCount": None,
-        "threadCount": None,
-        "handleCount": None,
+def _system_payload(raw):
+    raw = raw or {}
+    return {
+        "physicalTotalMb": _safe_float(raw.get("physical_total_mb")),
+        "physicalAvailableMb": _safe_float(raw.get("physical_available_mb")),
+        "physicalUsedMb": _safe_float(raw.get("physical_used_mb")),
+        "physicalUsedPct": _safe_float(raw.get("physical_used_pct")),
+        "commitMb": _safe_float(raw.get("commit_mb")),
+        "commitLimitMb": _safe_float(raw.get("commit_limit_mb")),
+        "commitPct": _safe_float(raw.get("commit_pct")),
+        "commitPeakMb": _safe_float(raw.get("commit_peak_mb")),
+        "systemCacheMb": _safe_float(raw.get("system_cache_mb")),
+        "kernelPagedMb": _safe_float(raw.get("kernel_paged_mb")),
+        "kernelNonpagedMb": _safe_float(raw.get("kernel_nonpaged_mb")),
+        "processCount": _safe_int(raw.get("process_count")),
+        "threadCount": _safe_int(raw.get("thread_count")),
+        "handleCount": _safe_int(raw.get("handle_count")),
     }
-
-    if os.name == "nt":
-        try:
-            import ctypes
-            from ctypes import wintypes
-
-            class PERFORMANCE_INFORMATION(ctypes.Structure):
-                _fields_ = [
-                    ("cb", wintypes.DWORD),
-                    ("CommitTotal", ctypes.c_size_t),
-                    ("CommitLimit", ctypes.c_size_t),
-                    ("CommitPeak", ctypes.c_size_t),
-                    ("PhysicalTotal", ctypes.c_size_t),
-                    ("PhysicalAvailable", ctypes.c_size_t),
-                    ("SystemCache", ctypes.c_size_t),
-                    ("KernelTotal", ctypes.c_size_t),
-                    ("KernelPaged", ctypes.c_size_t),
-                    ("KernelNonpaged", ctypes.c_size_t),
-                    ("PageSize", ctypes.c_size_t),
-                    ("HandleCount", wintypes.DWORD),
-                    ("ProcessCount", wintypes.DWORD),
-                    ("ThreadCount", wintypes.DWORD),
-                ]
-
-            info = PERFORMANCE_INFORMATION()
-            info.cb = ctypes.sizeof(info)
-            fn = ctypes.windll.psapi.GetPerformanceInfo
-            fn.argtypes = [ctypes.POINTER(PERFORMANCE_INFORMATION), wintypes.DWORD]
-            fn.restype = wintypes.BOOL
-            if not fn(ctypes.byref(info), info.cb):
-                return empty
-
-            page = float(info.PageSize)
-
-            def pages_mb(value):
-                return float(value) * page / MB
-
-            total = pages_mb(info.PhysicalTotal)
-            available = pages_mb(info.PhysicalAvailable)
-            used = max(0.0, total - available)
-            commit = pages_mb(info.CommitTotal)
-            commit_limit = pages_mb(info.CommitLimit)
-
-            return {
-                "physicalTotalMb": total,
-                "physicalAvailableMb": available,
-                "physicalUsedMb": used,
-                "physicalUsedPct": (100.0 * used / total) if total else None,
-                "commitMb": commit,
-                "commitLimitMb": commit_limit,
-                "commitPct": (100.0 * commit / commit_limit) if commit_limit else None,
-                "commitPeakMb": pages_mb(info.CommitPeak),
-                "systemCacheMb": pages_mb(info.SystemCache),
-                "kernelPagedMb": pages_mb(info.KernelPaged),
-                "kernelNonpagedMb": pages_mb(info.KernelNonpaged),
-                "processCount": int(info.ProcessCount),
-                "threadCount": int(info.ThreadCount),
-                "handleCount": int(info.HandleCount),
-            }
-        except Exception:
-            return empty
-
-    psutil = getattr(scriptwatch, "psutil", None)
-    if psutil is not None:
-        try:
-            vm = psutil.virtual_memory()
-            total = float(vm.total) / MB
-            available = float(vm.available) / MB
-            used = max(0.0, total - available)
-            result = dict(empty)
-            result.update({
-                "physicalTotalMb": total,
-                "physicalAvailableMb": available,
-                "physicalUsedMb": used,
-                "physicalUsedPct": (100.0 * used / total) if total else None,
-                "processCount": len(psutil.pids()),
-            })
-            return result
-        except Exception:
-            pass
-    return empty
 
 
 class DashboardState:
@@ -182,20 +80,13 @@ class DashboardState:
         self.history = deque(maxlen=history_points)
         self.error = None
         self.exited = False
-        self.private_baseline_mb = None
+        self.baselines = {}
         self.worker = threading.Thread(target=self._run, name="ScriptWatchSampler", daemon=True)
 
     def start(self):
         self.worker.start()
 
     def stop(self):
-        """
-        The sampler owns the CSV handle and closes it in its own finally block,
-        so shutdown never closes the file out from under a write in progress.
-        The join budget must exceed the probe's own timeout: a PowerShell sample
-        can sit in a subprocess for up to 20 seconds, which is far longer than
-        one sample interval.
-        """
         self.stop_event.set()
         if self.worker.is_alive():
             self.worker.join(timeout=max(30.0, self.interval + 25.0))
@@ -226,23 +117,25 @@ class DashboardState:
                     self.latest = payload
                     self.history.append(point)
                     self.error = None
-            except Exception as exc:  # dashboard must not crash the observed job
+            except Exception as exc:
                 with self.lock:
                     self.error = "%s: %s" % (exc.__class__.__name__, exc)
 
             elapsed = time.time() - started
-            wait_for = max(0.15, self.interval - elapsed)
-            self.stop_event.wait(wait_for)
+            self.stop_event.wait(max(0.15, self.interval - elapsed))
+
+    def _delta(self, key, value):
+        value = _safe_float(value)
+        if value is None:
+            return None
+        if key not in self.baselines:
+            self.baselines[key] = value
+        return value - self.baselines[key]
 
     def _build_payload(self, snap):
-        """
-        Process/job derived values come from Monitor.snapshot(), which is the
-        single source of truth shared with the console. Host memory counters are
-        an independent browser-dashboard enrichment sampled beside that state.
-        """
         monitor = self.monitor
         state = monitor.snapshot(snap)
-        system = _system_memory_sample()
+        system = _system_payload(state.get("system"))
 
         finish_at = None
         if state["eta"] is not None:
@@ -254,11 +147,15 @@ class DashboardState:
             percent = max(0.0, min(100.0, percent))
 
         private_mb = _safe_float(state["private_mb"])
-        if self.private_baseline_mb is None and private_mb is not None:
-            self.private_baseline_mb = private_mb
-        private_delta = (private_mb - self.private_baseline_mb
-                         if private_mb is not None and self.private_baseline_mb is not None
-                         else None)
+        private_delta = self._delta("private_mb", private_mb)
+        io_read = _safe_int(state.get("io_read_bytes"))
+        io_write = _safe_int(state.get("io_write_bytes"))
+        io_other = _safe_int(state.get("io_other_bytes"))
+        page_faults = _safe_int(state.get("page_faults"))
+
+        metrics = state.get("metrics")
+        if not isinstance(metrics, list):
+            metrics = []
 
         return {
             "timestamp": state["sampled_at"],
@@ -283,7 +180,13 @@ class DashboardState:
                 "heartbeatSeen": bool(state["heartbeat_seen"]),
                 "heartbeatWrites": state["writes"],
                 "host": state["host"] or "",
-                "note": monitor.hb.get("note") or "",
+                "note": state.get("heartbeat_note") or "",
+                "tool": state.get("tool") or "",
+                "toolVersion": state.get("tool_version") or "",
+                "harnessVersion": state.get("harness_version") or "",
+                "heartbeatSchema": state.get("heartbeat_schema") or "",
+                "mode": state.get("job_mode") or "",
+                "metrics": metrics,
             },
             "process": {
                 "pid": _safe_int(state["pid"]),
@@ -291,13 +194,26 @@ class DashboardState:
                 "uptimeSeconds": _safe_float(state["uptime"]),
                 "cpuPct": _safe_float(state["cpu"]),
                 "privateMb": private_mb,
-                "privateBaselineMb": _safe_float(self.private_baseline_mb),
-                "privateDeltaMb": _safe_float(private_delta),
+                "privateBaselineMb": self.baselines.get("private_mb"),
+                "privateDeltaMb": private_delta,
                 "peakPrivateMb": _safe_float(state["peak_private_mb"]),
                 "workingMb": _safe_float(state["working_mb"]),
                 "pagefileMb": _safe_float(state["pagefile_mb"]),
                 "threads": _safe_int(state["threads"]),
                 "handles": _safe_int(state["handles"]),
+                "pageFaults": page_faults,
+                "pageFaultDelta": self._delta("page_faults", page_faults),
+                "gdiObjects": _safe_int(state.get("gdi_objects")),
+                "userObjects": _safe_int(state.get("user_objects")),
+                "ioReadBytes": io_read,
+                "ioWriteBytes": io_write,
+                "ioOtherBytes": io_other,
+                "ioReadDeltaBytes": self._delta("io_read_bytes", io_read),
+                "ioWriteDeltaBytes": self._delta("io_write_bytes", io_write),
+                "ioOtherDeltaBytes": self._delta("io_other_bytes", io_other),
+                "ioReadOps": _safe_int(state.get("io_read_ops")),
+                "ioWriteOps": _safe_int(state.get("io_write_ops")),
+                "ioOtherOps": _safe_int(state.get("io_other_ops")),
                 "responding": state["responding"],
             },
             "system": system,
@@ -380,11 +296,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 
 def make_monitor_args(args):
-    """
-    Start from the collector's own parser defaults, then apply whatever the
-    dashboard was given. A new flag in scriptwatch.build_parser() reaches the
-    web layer without a matching edit here.
-    """
     values = vars(scriptwatch.build_parser().parse_args([]))
     for key, value in vars(args).items():
         if key in values and value is not None:
@@ -398,7 +309,7 @@ def main(argv=None):
         prog="scriptwatch_web",
         description="Browser dashboard for ScriptWatch / InDesign ExtendScript jobs.")
     ap.add_argument("--heartbeat", "-b", default=os.environ.get("SCRIPTWATCH_HEARTBEAT"),
-                    help="heartbeat JSON path; newest valid heartbeat is auto-discovered when omitted")
+                    help="heartbeat JSON path; newest plausible heartbeat is auto-discovered")
     ap.add_argument("--pid", type=int, help="attach to a specific InDesign PID")
     ap.add_argument("--process", default=scriptwatch.DEFAULT_PROCESS,
                     help="process name fragment (default: InDesign)")
@@ -413,10 +324,8 @@ def main(argv=None):
     ap.add_argument("--watch", help="optional log/checkpoint file whose size should be tracked")
     ap.add_argument("--csv", help="sample CSV path; defaults to DocStats")
     ap.add_argument("--dir", help="runtime directory; overrides SCRIPTWATCH_DIR / DocStats")
-    ap.add_argument("--host", default=DEFAULT_HOST,
-                    help="HTTP bind host (default: 127.0.0.1)")
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT,
-                    help="HTTP port (default: 8765)")
+    ap.add_argument("--host", default=DEFAULT_HOST, help="HTTP bind host (default: 127.0.0.1)")
+    ap.add_argument("--port", type=int, default=DEFAULT_PORT, help="HTTP port (default: 8765)")
     ap.add_argument("--history-points", type=int, default=DEFAULT_HISTORY_POINTS,
                     help="number of recent samples sent to the browser")
     ap.add_argument("--no-browser", action="store_true",
@@ -433,9 +342,9 @@ def main(argv=None):
 
     handler = lambda *a, **kw: DashboardHandler(*a, directory=str(dashboard_dir), **kw)
     DashboardHandler.state = state
-
     server = ThreadingHTTPServer((args.host, args.port), handler)
-    url = "http://%s:%d/" % ("127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host, args.port)
+    url = "http://%s:%d/" % (
+        "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host, args.port)
 
     print("ScriptWatch browser dashboard")
     print("  URL:       %s" % url)
@@ -459,7 +368,6 @@ def main(argv=None):
         server.shutdown()
         server.server_close()
         state.stop()
-
     return 0
 
 
