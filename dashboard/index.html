@@ -23,12 +23,21 @@
     </header>
 
     <main class="dashboard-grid">
-      <section class="column-panel">
+      <section id="job-panel" class="column-panel">
         <div class="section-heading">
           <span>01</span>
           <div><h2>Job execution</h2><p>Heartbeat, progress, and transaction pace</p></div>
         </div>
-        <div class="hero-grid">
+
+        <div id="process-only-banner" class="process-only-banner" hidden>
+          <div class="process-only-lamp"></div>
+          <div>
+            <strong>PROCESS TELEMETRY ONLY</strong>
+            <p>This job does not publish a ScriptWatch heartbeat. Runtime health remains live.</p>
+          </div>
+        </div>
+
+        <div class="job-detail hero-grid">
           <div class="gauge-card">
             <div id="progress-gauge" class="ring-gauge">
               <div class="ring-center"><strong id="progress-percent">--</strong><span>complete</span></div>
@@ -41,17 +50,21 @@
             <div class="metric-card compact"><span>Checkpoint</span><strong id="checkpoint-value">--</strong></div>
           </div>
         </div>
-        <div class="metric-grid two">
+
+        <div class="job-detail metric-grid two">
           <div class="metric-card"><span>Elapsed</span><strong id="elapsed-value">--:--:--</strong></div>
           <div class="metric-card"><span>ETA</span><strong id="eta-value">--:--:--</strong><small id="finish-value"></small></div>
           <div class="metric-card"><span>Average target</span><strong id="avg-value">--</strong></div>
           <div class="metric-card"><span>Throughput</span><strong id="rate-value">--</strong><small>targets/min</small></div>
         </div>
-        <div class="instrument-card">
+
+        <div class="instrument-card heartbeat-card">
           <div class="instrument-title"><span>Heartbeat</span><strong id="heartbeat-state">NO HEARTBEAT</strong></div>
-          <div class="signal-row"><span>Age</span><b id="heartbeat-age">--</b></div>
-          <div class="signal-row"><span>Writes</span><b id="heartbeat-writes">--</b></div>
-          <div class="signal-row"><span>Host</span><b id="heartbeat-host">--</b></div>
+          <div class="signal-grid">
+            <div class="signal-row"><span>Age</span><b id="heartbeat-age">--</b></div>
+            <div class="signal-row"><span>Writes</span><b id="heartbeat-writes">--</b></div>
+            <div class="signal-row"><span>Host</span><b id="heartbeat-host">--</b></div>
+          </div>
           <div class="path-line" id="heartbeat-path">process telemetry only</div>
         </div>
       </section>
@@ -61,30 +74,40 @@
           <span>02</span>
           <div><h2>Runtime health</h2><p>Windows process state from outside InDesign</p></div>
         </div>
-        <div class="runtime-gauges">
+
+        <div class="runtime-hero">
           <div class="gauge-card small">
             <div id="cpu-gauge" class="ring-gauge small-ring"><div class="ring-center"><strong id="cpu-value">--</strong><span>CPU</span></div></div>
           </div>
-          <div class="gauge-card small">
-            <div id="memory-gauge" class="ring-gauge small-ring memory-ring"><div class="ring-center"><strong id="private-value">--</strong><span>Private MB</span></div></div>
+          <div class="memory-instrument">
+            <span>Private memory</span>
+            <div class="memory-reading"><strong id="private-value">--</strong><small>MB</small></div>
+            <div class="memory-sub"><span id="private-peak">peak --</span><b id="memory-slope">collecting…</b></div>
           </div>
         </div>
+
         <div class="spark-card">
-          <div class="spark-head"><span>Private memory</span><strong id="private-peak">peak --</strong></div>
-          <svg id="memory-spark" class="sparkline" viewBox="0 0 400 92" preserveAspectRatio="none"></svg>
-          <div class="spark-foot"><span>least-squares slope</span><strong id="memory-slope">collecting…</strong></div>
+          <div class="spark-head"><span>Private memory history</span><strong id="memory-coverage">collecting…</strong></div>
+          <svg id="memory-spark" class="sparkline" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
+          <div class="spark-foot"><span>least-squares slope after coverage floor</span><strong id="memory-slope-foot">collecting…</strong></div>
         </div>
+
         <div class="metric-grid two runtime-metrics">
           <div class="metric-card"><span>Working set</span><strong id="working-value">--</strong><small>MB</small></div>
-          <div class="metric-card"><span>Pagefile</span><strong id="pagefile-value">--</strong><small>backend-local</small></div>
+          <div class="metric-card"><span>Peak private</span><strong id="peak-private-value">--</strong><small>MB</small></div>
           <div class="metric-card"><span>Threads</span><strong id="threads-value">--</strong></div>
           <div class="metric-card"><span>Handles</span><strong id="handles-value">--</strong></div>
         </div>
-        <div class="instrument-card">
-          <div class="signal-row"><span>PID</span><b id="pid-value">--</b></div>
-          <div class="signal-row"><span>Probe</span><b id="backend-value">--</b></div>
-          <div class="signal-row"><span>Process uptime</span><b id="uptime-value">--:--:--</b></div>
-          <div class="signal-row"><span>UI pump</span><b id="responding-value">--</b></div>
+
+        <div class="instrument-card runtime-detail">
+          <div class="signal-grid two">
+            <div class="signal-row"><span>PID</span><b id="pid-value">--</b></div>
+            <div class="signal-row"><span>Probe</span><b id="backend-value">--</b></div>
+            <div class="signal-row"><span>Process uptime</span><b id="uptime-value">--:--:--</b></div>
+            <div class="signal-row"><span>UI pump</span><b id="responding-value">--</b></div>
+            <div class="signal-row"><span>Pagefile</span><b id="pagefile-value">--</b></div>
+          </div>
+          <div class="detail-note">Pagefile is backend-local and informational only.</div>
         </div>
       </section>
 
@@ -93,23 +116,35 @@
           <span>03</span>
           <div><h2>Trends & alerts</h2><p>Retention, throughput, and operational signals</p></div>
         </div>
-        <div class="trend-banner"><div><span>Throughput trend</span><strong id="throughput-trend">collecting…</strong></div><div id="trend-arrow" class="trend-arrow">→</div></div>
+
+        <div class="trend-banner">
+          <div><span>Throughput trend</span><strong id="throughput-trend">collecting…</strong><small id="throughput-coverage">collecting coverage…</small></div>
+          <div id="trend-arrow" class="trend-arrow">→</div>
+        </div>
+
         <div class="spark-card">
           <div class="spark-head"><span>Throughput</span><strong id="rate-now">-- tgt/min</strong></div>
-          <svg id="rate-spark" class="sparkline cyan" viewBox="0 0 400 92" preserveAspectRatio="none"></svg>
+          <svg id="rate-spark" class="sparkline cyan" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
         </div>
+
         <div class="spark-card">
           <div class="spark-head"><span>Handle count</span><strong id="handles-now">--</strong></div>
-          <svg id="handles-spark" class="sparkline amber" viewBox="0 0 400 92" preserveAspectRatio="none"></svg>
+          <svg id="handles-spark" class="sparkline amber" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
         </div>
+
         <div class="alert-card">
           <div class="instrument-title"><span>Alert channel</span><strong id="alert-count">0</strong></div>
           <div id="alerts-list" class="alerts-list"><div class="alert-item quiet">No active alerts.</div></div>
         </div>
+
         <div class="instrument-card">
-          <div class="signal-row"><span>Samples</span><b id="samples-value">--</b></div>
-          <div class="signal-row"><span>Trend window</span><b id="trend-window">--</b></div>
-          <div class="signal-row"><span>Watched file</span><b id="watch-size">--</b></div>
+          <div class="signal-grid two">
+            <div class="signal-row"><span>Samples</span><b id="samples-value">--</b></div>
+            <div class="signal-row"><span>Coverage</span><b id="coverage-value">--</b></div>
+            <div class="signal-row"><span>Required</span><b id="coverage-required">--</b></div>
+            <div class="signal-row"><span>Trend window</span><b id="trend-window">--</b></div>
+            <div class="signal-row"><span>Watched file</span><b id="watch-size">--</b></div>
+          </div>
           <div class="path-line" id="csv-path">CSV path pending…</div>
         </div>
       </section>
