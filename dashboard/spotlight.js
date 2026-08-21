@@ -1,5 +1,5 @@
 /*
-ScriptWatch instrument-console visual layer v0.1.0
+ScriptWatch instrument-console visual layer v0.1.1
 
 Presentation-only companion to dashboard/app.js. It derives source-state
 semantics from existing rendered values and classes. No collector contract is
@@ -84,8 +84,8 @@ changed here.
   function gaugePercent(id) {
     const el = byId(id);
     if (!el) return null;
-    const raw = el.style.getPropertyValue("--p");
-    if (!finite(raw)) return null;
+    const raw = el.style.getPropertyValue("--p").trim();
+    if (raw === "" || !finite(raw)) return null;
     return Math.max(0, Math.min(100, Number(raw)));
   }
 
@@ -109,7 +109,7 @@ changed here.
     if (globalState === "fault") return "fault";
     if (globalState === "dormant") return "dormant";
     if (card?.classList.contains("unavailable")) return "dormant";
-    return "live";
+    return gaugePercent(id) === null ? "dormant" : "live";
   }
 
   function applyGaugeState(id, state) {
@@ -193,6 +193,7 @@ changed here.
       if (id === "progress-gauge") {
         const processOnly = byId("job-panel")?.classList.contains("process-only");
         if (processOnly && globalState === "live") state = "unsupported";
+        else if (gaugePercent(id) === null && globalState === "live") state = "dormant";
       } else {
         state = stateForGauge(id, globalState);
       }
