@@ -149,28 +149,53 @@ def enable_ansi():
 # Heartbeat reader
 # --------------------------------------------------------------------------
 
-def discover_heartbeat(directory):
-    """Newest *.json in `directory` that parses and looks like a heartbeat."""
-    best, best_mtime = None, -1.0
+TERMINAL_STATUSES = ("DONE", "COMPLETE", "FINISHED", "ABORTED", "ERROR", "FAILED")
+
+
+def discover_heartbeat(directory, stale_after=DEFAULT_STALL):
+    """
+    Newest heartbeat in `directory` that could plausibly belong to a live job.
+
+    Finished heartbeats outlive their jobs: finish() writes a terminal status
+    and releases the lock, but the JSON stays in the runtime directory. With
+    several tools writing slugged files, the newest file by mtime is often a
+    completed run from yesterday, and attaching to it would report COMPLETE with
+    a full progress ring for a job that is not running at all.
+
+    A candidate is therefore skipped when its status is terminal AND it has not
+    been written within `stale_after`. A terminal status written seconds ago is
+    kept: that is a job finishing while the console watches, which is worth
+    showing. An explicit --heartbeat always wins, because naming a file is an
+    instruction rather than a guess.
+
+    Returns (path, skipped) where `skipped` lists (path, status) for candidates
+    that were passed over, so the caller can say why nothing was found.
+    """
+    now_ts = time.time()
+    best, best_mtime, skipped = None, -1.0, []
     try:
         names = os.listdir(directory)
     except OSError:
-        return None
+        return None, skipped
     for name in names:
         if not name.lower().endswith(".json"):
             continue
         path = os.path.join(directory, name)
         try:
             mtime = os.path.getmtime(path)
-            if mtime <= best_mtime:
-                continue
             with open(path, "r", encoding="utf-8-sig") as fh:
                 data = json.load(fh)
-            if isinstance(data, dict) and "job" in data and "target" in data:
+            if not (isinstance(data, dict) and "job" in data and "target" in data):
+                continue
+            status = str(data.get("status", "")).upper()
+            if status in TERMINAL_STATUSES and (now_ts - mtime) > stale_after:
+                skipped.append((path, status))
+                continue
+            if mtime > best_mtime:
                 best, best_mtime = path, mtime
         except Exception:
             continue
-    return best
+    return best, skipped
 
 
 class Heartbeat(object):
@@ -430,7 +455,7 @@ def is_responding(pid):
 CSV_COLUMNS = ["iso", "epoch", "pid", "cpu_pct", "working_mb", "private_mb",
                "pagefile_mb", "threads", "handles", "responding", "job", "target",
                "total", "passed", "failed", "checkpoint", "hb_age_s",
-               "rate_per_min", "eta_s", "watch_bytes"]
+               "rate_per_min", "eta_s", "watch_bytes", "heartbeat_note"]
 
 
 class Monitor(object):
@@ -438,7 +463,18 @@ class Monitor(object):
         self.args = args
         self.dir = resolve_dir(args.dir)
         self.warnings = []
-        self.hb = Heartbeat(args.heartbeat or discover_heartbeat(self.dir))
+        hb_path = args.heartbeat
+        if not hb_path:
+            hb_path, skipped = discover_heartbeat(self.dir, args.stall)
+            if not hb_path and skipped:
+                # Say why discovery came up empty. Silence here reads as "no
+                # heartbeat was ever written", which is a different problem.
+                self.warnings.append(
+                    "skipped %d finished heartbeat%s in %s (%s); pass --heartbeat to "
+                    "attach anyway" % (len(skipped), "" if len(skipped) == 1 else "s",
+                                       self.dir,
+                                       ", ".join(sorted(set(s for _, s in skipped)))))
+        self.hb = Heartbeat(hb_path)
         self.hb.poll()
         self.pid = args.pid or self.hb.data.get("pid") or self._choose_pid()
         if not self.pid:
@@ -619,6 +655,7 @@ class Monitor(object):
             "" if rate is None else round(rate, 3),
             "" if eta is None else round(eta, 0),
             "" if watch_bytes is None else watch_bytes,
+            self.hb.get("note", ""),
         ])
         self.csv_file.flush()
         return {"proc": proc, "rate": rate, "eta": eta, "responding": responding,
@@ -711,6 +748,7 @@ class Monitor(object):
             "heartbeat_seen": self.hb.ever_seen,
             "host": self.hb.get("host"),
             "writes": self.hb.get("writes"),
+            "heartbeat_note": self.hb.get("note"),
             "target": target,
             "total": total,
             "percent": pct,
@@ -804,6 +842,10 @@ def report(path, stall_seconds):
     print("Window           %s -> %s  (%s)"
           % (rows[0]["iso"], rows[-1]["iso"], hms((t1 - t0) if t0 and t1 else None)))
     print("Samples          %d" % len(rows))
+    heartbeat_notes = [str(r.get("heartbeat_note") or "").strip()
+                       for r in rows if str(r.get("heartbeat_note") or "").strip()]
+    if heartbeat_notes:
+        print("Heartbeat note   %s" % heartbeat_notes[-1])
     if mem:
         print("Private MB       start %.1f   end %.1f   peak %.1f   delta %+.1f"
               % (mem[0][1], mem[-1][1], max(v for _, v in mem), mem[-1][1] - mem[0][1]))
