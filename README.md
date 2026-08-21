@@ -1,15 +1,15 @@
 # ScriptWatch
 
-ScriptWatch observes long-running Adobe InDesign ExtendScript jobs from outside the InDesign process.
+ScriptWatch observes long-running Adobe InDesign ExtendScript jobs without making observability a dependency of the work.
 
 It has four cooperating components and two acquisition paths:
 
-1. `ScriptWatchJob.jsxinc` is the **ScriptWatch Harness** embedded in suite tools. It standardizes job units, PASS/FAIL accounting, checkpoints, terminal state, and harness-version reporting.
-2. `ScriptWatchHeartbeat.jsxinc` is the in-process emitter used by the Harness to publish small job-state heartbeats.
-3. `scriptwatch.py` is the out-of-process collector. It combines heartbeat state with Windows process telemetry and writes a CSV.
-4. `scriptwatch_web.py` presents the collector data in a local browser dashboard and adds host-level memory/commit telemetry for visualization.
+1. `ScriptWatchJob.jsxinc` is the **ScriptWatch Harness** embedded in participating scripts. It standardizes job units, PASS/FAIL accounting, checkpoints, terminal state, version provenance, and optional domain metrics.
+2. `ScriptWatchHeartbeat.jsxinc` is the fail-isolated in-process transport used by the Harness.
+3. `scriptwatch.py` is the out-of-process collector. It combines heartbeat state with process and host telemetry and writes the canonical sample CSV.
+4. `scriptwatch_web.py` presents the collector state in a local browser dashboard.
 
-The heartbeat path is agent-style instrumentation because each participating tool publishes its own work state through the Harness. Process and host telemetry remain agentless because ScriptWatch samples them from outside InDesign. Either path can operate without the other: a tool without the Harness still receives process telemetry, and a heartbeat can continue describing job state even when a particular host counter is unavailable.
+The Harness path is agent-style instrumentation because the script publishes the meaning of its own work. Process and host telemetry are agentless because ScriptWatch samples them externally. Either path can operate without the other.
 
 ## Runtime output
 
@@ -19,17 +19,19 @@ The default runtime directory is the suite DocStats directory. Python resolution
 
 The heartbeat emitter uses DocStats when present and falls back to a ScriptWatch temp folder only when DocStats is unavailable.
 
-### Heartbeat discovery
+## Heartbeat discovery
 
-With no `--heartbeat`, the collector attaches to the newest heartbeat in the runtime directory that could plausibly belong to a live job. Finished heartbeats outlive their jobs: `finish()` writes a terminal status and releases the lock, but the JSON stays in DocStats. Once several tools are writing slugged files, the newest file by modification time can be a completed run from an earlier session.
+With no `--heartbeat`, the collector attaches to the newest heartbeat in the runtime directory that could plausibly belong to a live job. Finished heartbeat JSON files remain after their jobs finish, so discovery filters stale terminal artifacts.
 
-A candidate is skipped when its status is terminal (`DONE`, `COMPLETE`, `FINISHED`, `ABORTED`, `ERROR`, `FAILED`) **and** it has not been written within the stall threshold (`--stall`, 180 seconds by default). A job that finished seconds ago remains eligible so the console can show a run crossing the finish line. When every candidate is skipped, the collector reports why instead of silently implying that no heartbeat was ever written:
+A candidate is skipped when its status is terminal (`DONE`, `COMPLETE`, `FINISHED`, `ABORTED`, `ERROR`, `FAILED`) **and** it has not been written within the stall threshold (`--stall`, 180 seconds by default). A job that finished seconds ago remains eligible so the console can show a run crossing the finish line.
+
+When every candidate is skipped, ScriptWatch reports the distinction:
 
 ```text
 ! skipped 3 finished heartbeats in D:\...\DocStats (ABORTED, COMPLETE, DONE); pass --heartbeat to attach anyway
 ```
 
-An explicit `--heartbeat` bypasses discovery filtering. Naming a heartbeat file is an instruction to attach to that file, including a finished run.
+An explicit `--heartbeat` bypasses discovery filtering.
 
 ## Console monitor
 
@@ -45,13 +47,37 @@ python scriptwatch.py --heartbeat "D:\path\NormalFix.json"
 python scriptwatch.py --report "D:\path\ScriptWatch_run.csv"
 ```
 
-ScriptWatch uses `psutil` when installed and otherwise falls back to PowerShell `Get-Process`. Private bytes are the memory trend and alert signal. Working set and the backend-local pagefile counter are informational.
+ScriptWatch uses `psutil` when installed and otherwise falls back to PowerShell `Get-Process` on Windows. Private bytes are the memory trend and alert signal. Working set and the backend-local pagefile counter remain informational.
 
-Each CSV sample also records the current `heartbeat_note`. Harness-managed jobs prefix that note with `<tool> · harness <version>`, giving completed runs a durable record of the Harness contract that produced their job counters. The final heartbeat preserves the same prefix even when a phase label or terminal error is appended.
+### Canonical collector counters
+
+The collector now records both process and host telemetry in the sample CSV. The browser no longer owns a second host-memory sampler.
+
+Process counters include:
+
+- CPU percentage
+- private bytes, working set, and backend-local pagefile value
+- thread and handle counts
+- cumulative read/write/other I/O bytes and operations
+- page-fault count
+- Windows GDI and USER object counts when available
+- process uptime and sampled UI-pump state
+
+Host counters include:
+
+- physical memory total, available, used, and used percent
+- system commit charge, limit, percent, and peak
+- system cache
+- kernel paged and nonpaged pool
+- system process, thread, and handle counts
+
+On Windows, host RAM and commit use `GetPerformanceInfo`. Process I/O, page-fault, GDI, and USER counters use Win32 APIs independently of the `psutil` or PowerShell process backend so the meanings remain consistent across those backends. Unsupported counters remain empty rather than being mapped to a different concept.
 
 ### Trend coverage
 
-No slope or throughput trend is reported until the window holds at least ten minutes of coverage across eight or more samples. InDesign allocates hard during start-up, so an hourly rate extrapolated from the first minute of a run reports warm-up as a leak. Until the floor is met, the console and the dashboard both report actual coverage (`collecting... 0:02:30 of 0:10:00`) and no memory alert can fire. `--report` applies the same floor and states when a run was too short to characterize.
+No private-memory slope or throughput trend is reported until the trend window holds at least ten minutes of coverage across eight or more samples. Until that floor is reached, the console and dashboard report the actual collecting interval and no memory-slope alert can fire.
+
+`--report` applies the same memory floor and summarizes the completed run. New-format CSVs also report system RAM/commit movement, process I/O deltas, page faults, GDI/USER objects, handle movement, Harness provenance, and final Harness metrics when present. Older ScriptWatch CSVs remain readable.
 
 ## Browser dashboard
 
@@ -59,9 +85,7 @@ No slope or throughput trend is reported until the window holds at least ten min
 python scriptwatch_web.py
 ```
 
-The dashboard binds to `127.0.0.1:8765` by default and opens in the default browser. It requires no new Python package and reuses the existing `scriptwatch.py` collector.
-
-The three-column dashboard is organized as:
+The dashboard binds to `127.0.0.1:8765` by default and opens in the default browser. It requires no additional Python package and uses `Monitor.snapshot()` as its telemetry contract.
 
 ### Job execution
 
@@ -71,52 +95,40 @@ The three-column dashboard is organized as:
 - average target time
 - throughput and ETA
 - heartbeat age and checkpoint
+- Harness tool/version/mode/schema provenance when present
+- custom Harness metrics as live number-in-box counters
 
 ### Runtime health
 
 - active circular dials for InDesign CPU, system physical-memory use, and system commit charge
 - sample-driven outer tracers that move only when a fresh telemetry sample arrives
 - private memory, peak private memory, private delta since dashboard attach, and qualified private-memory slope
-- a data-driven number-in-box counter bank for available RAM, commit headroom, working set, process threads/handles, and system process/thread/handle counts
+- live counter bank for RAM/commit headroom, cache/kernel pools, working set, I/O deltas, page-fault delta, GDI/USER objects, process threads/handles, and system process/thread/handle counts
 - backend-local pagefile counter
 - PID, process uptime, and UI-pump state
 
-On Windows, the host memory/commit dials use `GetPerformanceInfo` from `psapi.dll`. Physical RAM and system commit therefore have real denominators. The host probe also exposes system process, thread, handle, cache, and kernel-pool counters for future counter-bank expansion. On non-Windows systems with `psutil`, physical RAM remains available while Windows-specific commit counters are shown as unavailable rather than mapped to a different concept.
+The circular activity tracer is sample-driven rather than decorative. If the sampler stalls, the tracer stops. Number-in-box counters briefly flash their border when a fresh sample changes the displayed value. Reduced-motion preferences disable those animations.
 
 ### Trends & alerts
 
-- throughput trend
-- throughput sparkline
+- throughput trend and sparkline
+- private-memory trend and sparkline
 - handle-count sparkline
 - ScriptWatch alerts
-- sample count and trend window
+- sample count, trend coverage, and trend window
 - watched-file growth
 - CSV path
 
-The dashboard uses a dark operations-console visual language inspired by classic infrastructure monitoring tools without reproducing a specific product interface.
-
-Process/job derived values in `/api/status` come from `Monitor.snapshot()` in the collector, so the dashboard and the console do not re-derive the same run state. Host-level memory and commit counters are an independent dashboard enrichment sampled beside that state. The payload carries `memoryCollecting`, `throughputCollecting`, `coverageSeconds`, and `coverageRequiredSeconds` so panels can render a collecting state rather than plotting a warm-up artifact as a trend.
-
-The circular activity tracer is sample-driven rather than decorative: it advances only when `latest.timestamp` changes. If the sampler stalls, the tracer stops. Number-in-box counters can briefly flash their border when a fresh sample changes the value. Reduced-motion preferences disable those animations.
-
-The dashboard binds to loopback. Binding elsewhere with `--host` publishes job names, DocStats paths, and process telemetry to anyone who can reach the port, and prints a warning saying so.
-
-Useful options:
-
-```powershell
-python scriptwatch_web.py --pid 12345
-python scriptwatch_web.py --heartbeat "D:\path\NormalFix.json"
-python scriptwatch_web.py --port 8877
-python scriptwatch_web.py --no-browser
-```
+The dashboard binds to loopback. Binding elsewhere with `--host` publishes job names, runtime paths, and process telemetry to anyone who can reach the port, and ScriptWatch prints a warning saying so.
 
 Stopping the dashboard stops only the observer. It does not terminate InDesign or the observed ExtendScript job.
 
 ## ScriptWatch Harness adoption
 
-`ScriptWatchJob.jsxinc` is the single adoption point for suite tools. DocStats, StyleFix, HeaderFix, NormalFix, TableFix, and later tools can describe their work through the same contract while `ScriptWatchHeartbeat.jsxinc` remains the transport layer underneath it.
+`ScriptWatchJob.jsxinc` is the preferred adoption point for suite tools and an optional integration point for other ExtendScript authors.
 
-Current Harness contract version: **1.1**.
+Current Harness contract version: **1.2**.  
+Current heartbeat schema version: **1.2**.
 
 Include order:
 
@@ -125,49 +137,91 @@ Include order:
 #include "ScriptWatchJob.jsxinc"
 ```
 
+Observation is fail-isolated. If the heartbeat transport is unavailable, the tool continues and Harness calls degrade to no-op observation.
+
+### Structured provenance
+
+Harness 1.2 publishes these structured fields in addition to the human-readable note prefix:
+
+- `tool`
+- `toolVersion`
+- `harnessVersion`
+- `mode`
+- heartbeat `schemaVersion`
+
+The collector records the fields directly in CSV. The note still begins with `<tool> · harness <version>` for human inspection.
+
 ### Loop-based tools
 
 ```javascript
 var result = ScriptWatchJob.run({
     job: "NormalFix Read-Only Sweep",
     tool: "NormalFix",
+    toolVersion: "1.0.0",
     targets: paragraphs,
     checkpointEvery: 25,
-    onTarget: function (para, n) {
-        return normalizeParagraph(para);
+    onTarget: function (para, n, session) {
+        session.metric("Paragraphs visited", n, { unit: "paragraphs" });
+        return inspectParagraph(para);
     }
 });
 ```
 
-The Harness performs start, per-target tick, PASS/FAIL accounting, checkpoint plus optional `$.gc()`, and terminal `finish()` in a `finally`. It returns:
+The Harness performs start, per-target PASS/FAIL accounting, checkpoint plus optional `$.gc()`, and terminal `finish()` in a `finally`. It returns:
 
 ```text
-{ total, completed, pass, fail, errors, aborted }
+{ tool, toolVersion, harnessVersion, mode, total, completed, pass, fail, errors, aborted }
 ```
+
+One target is the unit the ETA is built from. For a nested tool, use the outer loop as the target and report inner position through `note()` or `metric()`.
+
+`false` is a FAIL, a thrown error is a FAIL, and any other return is a PASS. A failing target continues by default. With `continueOnError: false`, either an explicit `false` or a thrown target error publishes `ABORTED` and is rethrown to the caller after the terminal heartbeat is written.
 
 ### Phase-based tools
 
-Tools that are not natural loops can use named phases as their unit of work:
+Tools whose main control flow is already owned elsewhere can use a phase/session Harness:
 
 ```javascript
 var job = ScriptWatchJob.begin({
     job: "DocStats Inventory",
     tool: "DocStats",
+    toolVersion: "1.2.0",
     total: 3
 });
 
-job.step("Counting stories"); job.pass();
-job.step("Auditing styles");  job.fail("style table missing");
+job.step("Counting stories");
+job.metric("Stories", 26, { unit: "stories" });
+job.pass();
+
+job.step("Auditing styles");
+job.pass();
+
 job.end("DONE");
 ```
 
-Three conventions keep job reporting comparable across tools:
+This form is also the preferred integration pattern when another subsystem, such as a mutation transaction engine, owns sequencing. ScriptWatch observes progress and state; it does not replace mutation safety, verification, rollback, or durable transaction journaling.
 
-- **One target is the unit the ETA is built from.** For a nested tool, that is the outer loop. Report inner position with `note()` rather than counting inner items as targets.
-- **`false` is a FAIL, a thrown error is a FAIL, anything else is a PASS.** A tool returning nothing reports a pass, which is appropriate for successful read-only work.
-- **A failing target continues by default.** With `continueOnError: false`, either an explicit `false` result or a thrown target error marks the run `ABORTED`; thrown errors are rethrown after the terminal heartbeat is published, and explicit `false` is converted to an error for the same fail-fast contract.
+### Custom metrics
 
-The Harness keeps `<tool> · harness 1.1` at the front of every heartbeat note, including phase labels and terminal messages. Observation is fail-isolated: if `ScriptWatchHeartbeat.jsxinc` is unavailable, monitoring calls become no-ops while the work still runs through the Harness.
+Harness 1.2 adds a bounded custom numeric metric channel:
+
+```javascript
+job.metric("Stories", 26, {
+    unit: "stories",
+    display: "counter"
+});
+
+job.metric("Scan progress", 72.4, {
+    unit: "%",
+    min: 0,
+    max: 100,
+    display: "dial"
+});
+```
+
+The transport accepts up to 32 current metrics per job. Metric values must be finite numbers. Supported display metadata is `counter`, `dial`, or `trend`; unsupported values normalize to `counter`. The current dashboard renders custom metrics as number-in-box counters while preserving display/min/max metadata in the heartbeat and CSV for future presentation logic.
+
+This channel keeps domain telemetry out of the fixed ScriptWatch process schema. ScriptWatch knows the process and host. The Harness lets the script describe its own work.
 
 ## Raw heartbeat API
 
@@ -175,16 +229,22 @@ The raw heartbeat API remains available for unusual jobs that do not fit either 
 
 ```javascript
 #include "ScriptWatchHeartbeat.jsxinc"
-ScriptWatch.start({ job: "NormalFix Read-Only Sweep", total: targets.length });
-
-// inside the loop
-ScriptWatch.tick({ target: i + 1, ok: result });
-if ((i + 1) % 25 === 0) {
-    ScriptWatch.checkpoint(i + 1, true); // durable checkpoint + $.gc()
-}
-
-// in finally / shutdown path
+ScriptWatch.start({ job: "Custom Job", total: targets.length });
+ScriptWatch.metric("Items", 12, { unit: "items" });
+ScriptWatch.tick({ target: 1, ok: true });
 ScriptWatch.finish("DONE");
 ```
 
-The heartbeat writer is fail-isolated from the observed job. Public calls catch their own errors, writes are throttled, and heartbeat replacement uses a temporary file to avoid torn reads.
+Public heartbeat calls catch their own errors, writes are throttled, heartbeat replacement uses a temporary file to avoid torn reads, and `start()` resets prior job state so persistent ExtendScript engines do not carry metrics or write counters into the next run.
+
+## Canary tests
+
+The repository includes dependency-free canaries:
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+node tests\harness_canary.js
+node tests\heartbeat_canary.js
+```
+
+The collector canary covers heartbeat discovery, CSV-schema uniqueness, host-sample schema stability, and legacy-report compatibility. The JavaScript canaries cover Harness 1.2 provenance/metrics/fail-fast behavior and heartbeat 1.2 metric serialization, terminal state, lock release, and persistent-engine reset behavior.
