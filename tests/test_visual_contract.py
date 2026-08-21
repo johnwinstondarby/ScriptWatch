@@ -25,10 +25,32 @@ class VisualContractTests(unittest.TestCase):
         combined_css = css + "\n" + source_css
         for state in ("live", "dormant", "fault", "unsupported"):
             self.assertIn(f"state-{state}", combined_css)
-            self.assertIn(state.upper(), contract)
+        for state in ("NEVER_SAMPLED", "LIVE", "DORMANT", "AT_LIMIT", "FAULT"):
+            self.assertIn(state, contract)
         self.assertIn("--sw-console-amber", css)
         self.assertIn("telemetry-stale", css)
         self.assertIn("telemetry-fault", css)
+
+    def test_shared_instrument_state_machine_is_pinned(self):
+        state_js = (DASHBOARD / "instrument_state.js").read_text(encoding="utf-8")
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        for state in ("NEVER", "LIVE", "DORMANT", "LIMIT", "FAULT"):
+            self.assertIn(f'{state}:', state_js)
+        self.assertIn("lastKnown", state_js)
+        self.assertIn("boundedState", state_js)
+        self.assertIn("instrument_state.js", contract)
+        self.assertIn("Dormant", contract)
+        self.assertIn("last known", contract)
+
+    def test_workbench_exists_and_is_backend_free(self):
+        html = (DASHBOARD / "workbench.html").read_text(encoding="utf-8")
+        for name in ("SegmentedDial", "FlowLane", "Counter", "Meter"):
+            self.assertIn(name, html)
+        for state in ("Never sampled", "Live", "Dormant", "At limit", "Fault"):
+            self.assertIn(state, html)
+        self.assertIn('src="instrument_state.js"', html)
+        self.assertNotIn("fetch(", html)
+        self.assertIn("Host → Process → Heartbeat → Harness", html)
 
     def test_harness_state_is_explicit(self):
         js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
@@ -75,11 +97,18 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn("harness-off-bay", css)
         self.assertIn("A Harness data bay remains visible even when Harness is OFF", contract)
 
+    def test_counter_marks_are_not_decorative(self):
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        self.assertIn("Decorative dots", contract)
+        self.assertIn("per-counter lamp or dot must encode a real property", contract)
+
     def test_reduced_motion_is_preserved(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
         source_css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
+        workbench = (DASHBOARD / "workbench.html").read_text(encoding="utf-8")
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("prefers-reduced-motion", source_css)
+        self.assertIn("prefers-reduced-motion", workbench)
 
 
 if __name__ == "__main__":
