@@ -9,6 +9,7 @@ class VisualContractTests(unittest.TestCase):
     def test_layer_load_order(self):
         html = (DASHBOARD / "index.html").read_text(encoding="utf-8")
         self.assertLess(html.index('href="style.css"'), html.index('href="spotlight.css"'))
+        self.assertLess(html.index('href="spotlight.css"'), html.index('href="spotlight_sources.css"'))
         self.assertLess(html.index('src="app.js"'), html.index('src="spotlight.js"'))
 
     def test_visual_layer_does_not_poll_backend(self):
@@ -19,17 +20,44 @@ class VisualContractTests(unittest.TestCase):
 
     def test_source_state_vocabulary_is_pinned(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
+        source_css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
         contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        combined_css = css + "\n" + source_css
         for state in ("live", "dormant", "fault", "unsupported"):
-            self.assertIn(f"state-{state}", css)
+            self.assertIn(f"state-{state}", combined_css)
             self.assertIn(state.upper(), contract)
         self.assertIn("--sw-console-amber", css)
         self.assertIn("telemetry-stale", css)
         self.assertIn("telemetry-fault", css)
 
+    def test_harness_state_is_explicit(self):
+        js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        self.assertIn('id = "harness-indicator"', js)
+        self.assertIn("HARNESS = OFF", js)
+        self.assertIn("HARNESS = ON", js)
+        self.assertIn("`HARNESS = ON · ${harnessVersion}`", js)
+        self.assertIn("`HARNESS = ON`", contract)
+        self.assertIn("`HARNESS = OFF`", contract)
+
+    def test_counter_sources_are_partitioned(self):
+        js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
+        css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        for source in ("host", "process"):
+            self.assertIn(f'"{source}"', js)
+            self.assertIn(f"source-{source}", css)
+        self.assertIn("HARNESS COUNTERS", js)
+        self.assertIn("harness-counter-bank", css)
+        self.assertIn("Host counters", contract)
+        self.assertIn("InDesign process counters", contract)
+        self.assertIn("Harness counters", contract)
+
     def test_reduced_motion_is_preserved(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
+        source_css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
         self.assertIn("prefers-reduced-motion", css)
+        self.assertIn("prefers-reduced-motion", source_css)
 
 
 if __name__ == "__main__":
