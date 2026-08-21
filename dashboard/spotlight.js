@@ -1,5 +1,5 @@
 /*
-ScriptWatch instrument-console visual layer v0.2.0
+ScriptWatch instrument-console visual layer v0.3.0
 
 Presentation-only companion to dashboard/app.js. It derives source-state
 semantics from existing rendered values and classes. No collector contract is
@@ -59,6 +59,13 @@ changed here.
     return node;
   }
 
+  function ensureColumnRoles() {
+    const columns = document.querySelectorAll(".dashboard-grid > .column-panel");
+    if (columns[0]) columns[0].classList.add("source-column-job");
+    if (columns[1]) columns[1].classList.add("source-column-runtime");
+    if (columns[2]) columns[2].classList.add("source-column-trends");
+  }
+
   function ensureSourceBus() {
     if (document.querySelector(".source-bus")) return;
     const topbar = document.querySelector(".topbar");
@@ -91,6 +98,50 @@ changed here.
         <small>agentless observation</small>
       </div>`;
     topStatus.prepend(indicator);
+  }
+
+  function ensureHarnessOffBay() {
+    if (byId("harness-off-bay")) return;
+    const panel = byId("job-panel");
+    if (!panel) return;
+
+    const bay = document.createElement("section");
+    bay.id = "harness-off-bay";
+    bay.className = "instrument-card harness-off-bay state-unsupported";
+    bay.innerHTML = `
+      <div class="harness-off-heading">
+        <span class="harness-off-lamp" aria-hidden="true"></span>
+        <div>
+          <span>HARNESS DATA</span>
+          <small>semantic telemetry from inside the monitored script</small>
+        </div>
+        <strong>OFF</strong>
+      </div>
+      <div class="harness-off-body">
+        <b>Agentless observation</b>
+        <span>No Harness counters are published by this script. Host and InDesign process telemetry remain available.</span>
+      </div>`;
+
+    const summary = byId("process-only-summary");
+    if (summary) summary.insertAdjacentElement("afterend", bay);
+    else panel.appendChild(bay);
+  }
+
+  function ensureProcessCounterBay() {
+    if (byId("process-counter-bay")) return;
+    const handleCard = byId("handles-spark")?.closest(".spark-card");
+    if (!handleCard) return;
+
+    const bay = document.createElement("div");
+    bay.id = "process-counter-bay";
+    bay.className = "counter-section process-counter-bay";
+    bay.innerHTML = `
+      <div class="counter-section-head">
+        <span>Process telemetry</span>
+        <b>agentless source</b>
+      </div>
+      <div id="process-counter-mount"></div>`;
+    handleCard.insertAdjacentElement("afterend", bay);
   }
 
   function setSource(id, state, text) {
@@ -157,9 +208,10 @@ changed here.
     const bank = byId("counter-bank");
     if (!bank) return;
 
-    let hostGroup = bank.querySelector('[data-source-group="host"]');
-    let processGroup = bank.querySelector('[data-source-group="process"]');
-    let otherGroup = bank.querySelector('[data-source-group="other"]');
+    const processMount = byId("process-counter-mount");
+    let hostGroup = document.querySelector('[data-source-group="host"]');
+    let processGroup = document.querySelector('[data-source-group="process"]');
+    let otherGroup = document.querySelector('[data-source-group="other"]');
 
     const directCards = Array.from(bank.children).filter(child => child.classList?.contains("counter-card"));
     if (!hostGroup && !processGroup && directCards.length === 0) return;
@@ -170,12 +222,17 @@ changed here.
       otherGroup = counterSourceGroup("other", "OTHER COUNTERS", "unclassified telemetry");
       otherGroup.hidden = true;
       bank.appendChild(hostGroup);
-      bank.appendChild(processGroup);
       bank.appendChild(otherGroup);
+      if (processMount) processMount.appendChild(processGroup);
+      else bank.appendChild(processGroup);
       bank.classList.add("counter-source-bank");
 
       const heading = bank.closest(".counter-section")?.querySelector(".counter-section-head span");
-      if (heading) heading.textContent = "Counters by source";
+      if (heading) heading.textContent = "Host counters";
+    }
+
+    if (processGroup && processMount && processGroup.parentElement !== processMount) {
+      processMount.appendChild(processGroup);
     }
 
     const cards = Array.from(bank.querySelectorAll(":scope > .counter-card"));
@@ -183,7 +240,7 @@ changed here.
       const key = card.dataset.counter || "";
       const source = COUNTER_SOURCE[key] || "other";
       card.dataset.source = source;
-      const group = bank.querySelector(`[data-source-group="${source}"] .counter-source-grid`);
+      const group = document.querySelector(`[data-source-group="${source}"] .counter-source-grid`);
       if (group) group.appendChild(card);
       if (source === "other" && otherGroup) otherGroup.hidden = false;
     });
@@ -335,6 +392,14 @@ changed here.
     if (small) small.textContent = detail;
   }
 
+  function updateHarnessOffBay() {
+    const bay = byId("harness-off-bay");
+    const harnessCard = byId("harness-card");
+    if (!bay) return;
+    const harnessVisible = harnessCard && !harnessCard.hidden;
+    bay.hidden = Boolean(harnessVisible);
+  }
+
   function updateCounterSourceGroups() {
     ["host", "process", "other"].forEach(source => {
       const group = document.querySelector(`[data-source-group="${source}"]`);
@@ -364,9 +429,12 @@ changed here.
   }
 
   function updateVisualState() {
+    ensureColumnRoles();
     ensureSourceBus();
     ensureHarnessIndicator();
+    ensureHarnessOffBay();
     ensureCapacityRack();
+    ensureProcessCounterBay();
     ensureCounterSourceGroups();
     ensureHarnessCounterSection();
 
@@ -386,6 +454,7 @@ changed here.
 
     updateSourceBus(globalState);
     updateHarnessIndicator(globalState);
+    updateHarnessOffBay();
     updateCounterSourceGroups();
     applyCounterStates(globalState);
     updateCapacity(globalState);
