@@ -1,5 +1,8 @@
 const $ = (id) => document.getElementById(id);
 
+let lastSampleTimestamp = null;
+let activityAngle = 0;
+
 function num(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
   return Number(value).toFixed(digits);
@@ -20,17 +23,35 @@ function duration(seconds) {
   return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
+function memoryValue(mb, digits = 1) {
+  if (mb === null || mb === undefined || !Number.isFinite(Number(mb))) return "--";
+  const value = Number(mb);
+  if (Math.abs(value) >= 1024) return `${(value / 1024).toFixed(digits)} GB`;
+  return `${value.toFixed(digits)} MB`;
+}
+
+function signedMemory(mb) {
+  if (mb === null || mb === undefined || !Number.isFinite(Number(mb))) return "--";
+  const value = Number(mb);
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  return `${sign}${memoryValue(Math.abs(value))}`;
+}
+
 function setGauge(el, percent) {
   const p = Math.max(0, Math.min(100, Number(percent) || 0));
   el.style.setProperty("--p", p);
 }
 
+function setDial(gauge, value, detailEl, detail) {
+  const available = value !== null && value !== undefined && Number.isFinite(Number(value));
+  setGauge(gauge, available ? value : 0);
+  gauge.closest(".dial-card")?.classList.toggle("unavailable", !available);
+  if (detailEl) detailEl.textContent = detail || "--";
+}
+
 function sparkline(svg, history, key) {
-  // Number(null) is 0, so a JSON null read straight into the trace plots a gap
-  // in the data as a real reading at the bottom of the scale. Throughput is
-  // null until the collector has enough samples to compute a rate, and handles
-  // are null on non-Windows backends, so both would otherwise open with a
-  // fabricated climb from zero.
+  // Number(null) is 0, so nulls must be removed explicitly or missing data is
+  // drawn as a real zero. Timestamp-derived x positions preserve real gaps.
   const points = history.map(p => ({
     t: Number(p.t),
     v: (p[key] === null || p[key] === undefined || !Number.isFinite(Number(p[key])))
@@ -50,8 +71,6 @@ function sparkline(svg, history, key) {
     min -= 1;
   }
 
-  // x is derived from the timestamp, not the array index, so all three charts
-  // share one time axis and a gap stays visibly a gap.
   const t0 = points[0].t;
   const span = (points[points.length - 1].t - t0) || 1;
   const segments = [];
@@ -97,10 +116,6 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function collectingText(trends) {
-  return `collecting… ${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`;
-}
-
 function alertClass(text) {
   const s = String(text).toLowerCase();
   if (s.includes("memory rising") || s.includes("parse failure") || s.includes("stalled")) return "danger";
@@ -112,6 +127,65 @@ function setQualification(card, collecting) {
   card.classList.toggle("qualified", !collecting);
 }
 
+function animateFreshSample(timestamp) {
+  if (timestamp === null || timestamp === undefined || timestamp === lastSampleTimestamp) return false;
+  lastSampleTimestamp = timestamp;
+  activityAngle += 83;
+  document.querySelectorAll(".activity-ring").forEach(ring => {
+    ring.style.setProperty("--activity-angle", activityAngle);
+    ring.classList.remove("sample-hit");
+    void ring.offsetWidth;
+    ring.classList.add("sample-hit");
+    window.setTimeout(() => ring.classList.remove("sample-hit"), 620);
+  });
+  return true;
+}
+
+const COUNTER_REGISTRY = [
+  { key: "available-ram", label: "Available RAM", get: d => d.system?.physicalAvailableMb, format: v => memoryValue(v) },
+  { key: "commit-headroom", label: "Commit headroom", get: d => {
+      const s = d.system || {};
+      return Number.isFinite(Number(s.commitLimitMb)) && Number.isFinite(Number(s.commitMb))
+        ? Number(s.commitLimitMb) - Number(s.commitMb) : null;
+    }, format: v => memoryValue(v) },
+  { key: "private-delta", label: "Private Δ", get: d => d.process?.privateDeltaMb, format: v => signedMemory(v), note: "since attach" },
+  { key: "working-set", label: "Working set", get: d => d.process?.workingMb, format: v => memoryValue(v) },
+  { key: "threads", label: "Threads", get: d => d.process?.threads, format: v => integer(v), note: "InDesign" },
+  { key: "handles", label: "Handles", get: d => d.process?.handles, format: v => integer(v), note: "InDesign" },
+  { key: "sys-processes", label: "System processes", get: d => d.system?.processCount, format: v => integer(v) },
+  { key: "sys-threads", label: "System threads", get: d => d.system?.threadCount, format: v => integer(v) },
+  { key: "sys-handles", label: "System handles", get: d => d.system?.handleCount, format: v => integer(v) },
+];
+
+function ensureCounterBank() {
+  const bank = $("counter-bank");
+  if (bank.children.length) return;
+  bank.innerHTML = COUNTER_REGISTRY.map(c =>
+    `<div class="counter-card" data-counter="${c.key}"><span>${escapeHtml(c.label)}</span><strong>--</strong>${c.note ? `<small>${escapeHtml(c.note)}</small>` : ""}</div>`
+  ).join("");
+}
+
+function renderCounterBank(latest, freshSample) {
+  ensureCounterBank();
+  for (const spec of COUNTER_REGISTRY) {
+    const card = document.querySelector(`[data-counter="${spec.key}"]`);
+    if (!card) continue;
+    const raw = spec.get(latest);
+    const available = raw !== null && raw !== undefined && Number.isFinite(Number(raw));
+    const text = available ? spec.format(raw) : "--";
+    const strong = card.querySelector("strong");
+    const changed = strong.textContent !== text && strong.textContent !== "--";
+    strong.textContent = text;
+    card.classList.toggle("unavailable", !available);
+    if (freshSample && changed) {
+      card.classList.remove("sample-update");
+      void card.offsetWidth;
+      card.classList.add("sample-update");
+      window.setTimeout(() => card.classList.remove("sample-update"), 460);
+    }
+  }
+}
+
 function render(payload) {
   const latest = payload.latest;
   if (!latest) {
@@ -121,9 +195,11 @@ function render(payload) {
 
   const job = latest.job;
   const proc = latest.process;
+  const system = latest.system || {};
   const trends = latest.trends;
   const history = payload.history || [];
   const noHeartbeat = !job.heartbeatSeen;
+  const freshSample = animateFreshSample(latest.timestamp);
 
   $("job-name").textContent = job.name;
   setTopStatus(job.status, `${job.status}${job.statusNote ? " · " + job.statusNote : ""}`);
@@ -162,20 +238,34 @@ function render(payload) {
   $("po-required").textContent = duration(trends.coverageRequiredSeconds);
   $("po-csv-path").textContent = latest.monitor.csvPath || "CSV path pending…";
 
+  // Three bounded dials: process CPU, physical RAM use, and system commit charge.
   $("cpu-value").textContent = proc.cpuPct == null ? "--" : `${num(proc.cpuPct, 1)}%`;
-  setGauge($("cpu-gauge"), proc.cpuPct || 0);
+  setDial($("cpu-gauge"), proc.cpuPct, $("cpu-detail"), "process load");
+
+  $("ram-value").textContent = system.physicalUsedPct == null ? "--" : `${num(system.physicalUsedPct, 1)}%`;
+  setDial(
+    $("ram-gauge"), system.physicalUsedPct, $("ram-detail"),
+    system.physicalUsedMb == null || system.physicalTotalMb == null
+      ? "host counter unavailable"
+      : `${memoryValue(system.physicalUsedMb)} / ${memoryValue(system.physicalTotalMb)}`
+  );
+
+  $("commit-value").textContent = system.commitPct == null ? "--" : `${num(system.commitPct, 1)}%`;
+  setDial(
+    $("commit-gauge"), system.commitPct, $("commit-detail"),
+    system.commitMb == null || system.commitLimitMb == null
+      ? "host counter unavailable"
+      : `${memoryValue(system.commitMb)} / ${memoryValue(system.commitLimitMb)}`
+  );
 
   $("private-value").textContent = proc.privateMb == null ? "--" : integer(proc.privateMb);
-  $("private-peak").textContent = proc.peakPrivateMb == null ? "peak --" : `peak ${num(proc.peakPrivateMb, 1)} MB`;
-  $("peak-private-value").textContent = num(proc.peakPrivateMb, 1);
+  $("private-delta").textContent = signedMemory(proc.privateDeltaMb);
+  $("private-peak").textContent = proc.peakPrivateMb == null ? "--" : memoryValue(proc.peakPrivateMb);
 
   const memoryText = trends.memoryCollecting
-    ? collectingText(trends)
+    ? "trend pending"
     : `${trends.memorySlopeMbHour >= 0 ? "+" : ""}${num(trends.memorySlopeMbHour, 1)} MB/hr`;
-  // Coverage is stated once, on the history card's head. The instrument and the
-  // card foot carry the reading itself, so the same fact is not repeated four
-  // times down one column.
-  $("memory-slope").textContent = trends.memoryCollecting ? "trend pending" : memoryText;
+  $("memory-slope").textContent = memoryText;
   $("memory-slope-foot").textContent = trends.memoryCollecting ? "pending" : memoryText;
   $("memory-coverage").textContent = trends.memoryCollecting
     ? `${duration(trends.coverageSeconds)} of ${duration(trends.coverageRequiredSeconds)}`
@@ -185,20 +275,21 @@ function render(payload) {
     : "least-squares slope · qualified";
   setQualification($("memory-spark-card"), trends.memoryCollecting);
 
-  $("working-value").textContent = num(proc.workingMb, 1);
-  $("pagefile-value").textContent = proc.pagefileMb == null ? "--" : `${num(proc.pagefileMb, 1)} MB`;
-  $("threads-value").textContent = integer(proc.threads);
-  $("handles-value").textContent = integer(proc.handles);
   $("pid-value").textContent = integer(proc.pid);
   $("backend-value").textContent = proc.backend;
   $("uptime-value").textContent = duration(proc.uptimeSeconds);
   $("responding-value").textContent = proc.responding === null
     ? "not sampled"
     : (proc.responding ? "responsive" : "blocked · expected during modal script");
+  $("pagefile-value").textContent = proc.pagefileMb == null ? "--" : memoryValue(proc.pagefileMb);
 
-  // Without a heartbeat there is no throughput source at all, so the panel must
-  // not say "collecting" or count down a qualification floor it can never
-  // reach. That is a different state from a trend that is still warming up.
+  renderCounterBank(latest, freshSample);
+  if (freshSample) {
+    $("counter-bank-state").textContent = `sample ${new Date(latest.timestamp * 1000).toLocaleTimeString()}`;
+  }
+
+  // Without a heartbeat there is no throughput source at all. "Unavailable"
+  // differs from a trend still collecting toward its qualification floor.
   const trend = noHeartbeat
     ? "unavailable"
     : (trends.throughputCollecting ? "collecting…" : (trends.throughput || "stable"));
@@ -248,14 +339,12 @@ function render(payload) {
   $("csv-path").textContent = latest.monitor.csvPath;
   $("last-sample").textContent = `Last sample ${new Date(latest.timestamp * 1000).toLocaleTimeString()}`;
 
-  // The sampler can stall without the HTTP server noticing: a PowerShell probe
-  // can sit in a subprocess for up to 20 seconds. Compare the sample age
-  // against the observed cadence rather than trusting that data is current.
-  const cadence = history.length > 1
+  const cadence = latest.monitor.intervalSeconds || (history.length > 1
     ? Math.max(1, (history[history.length - 1].t - history[0].t) / (history.length - 1))
-    : 5;
+    : 5);
   const sampleAge = Date.now() / 1000 - latest.timestamp;
   const stale = sampleAge > Math.max(15, cadence * 3);
+  document.body.classList.toggle("telemetry-stale", stale || payload.processExited);
 
   if (payload.processExited) {
     $("footer-status").textContent = "Observed InDesign process exited. Historical telemetry remains displayed.";
@@ -269,8 +358,8 @@ function render(payload) {
     $("footer-status").textContent = `Collector warning: ${payload.error}`;
   } else {
     $("footer-status").textContent = job.heartbeatSeen
-      ? "Heartbeat + process telemetry"
-      : "Process telemetry only · no heartbeat from this job";
+      ? "Heartbeat + process telemetry + host memory telemetry"
+      : "Process + host telemetry only · no heartbeat from this job";
   }
 }
 
@@ -282,6 +371,7 @@ async function poll() {
   } catch (err) {
     $("footer-status").textContent = `Dashboard connection error: ${err.message}`;
     setTopStatus("error", "DASHBOARD CONNECTION ERROR");
+    document.body.classList.add("telemetry-stale");
   }
 }
 
