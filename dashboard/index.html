@@ -17,7 +17,7 @@
         <span id="status-dot" class="status-dot collecting"></span>
         <div>
           <div id="job-name" class="job-name">Collecting telemetry…</div>
-          <div id="status-text" class="status-text">STARTING</div>
+          <div id="status-text" class="status-text status-collecting">STARTING</div>
         </div>
       </div>
     </header>
@@ -35,6 +35,24 @@
             <strong>PROCESS TELEMETRY ONLY</strong>
             <p>This job does not publish a ScriptWatch heartbeat. Runtime health remains live.</p>
           </div>
+        </div>
+
+        <div id="process-only-summary" class="process-only-summary" hidden>
+          <div class="instrument-title"><span>Observer session</span><strong>LIVE PROCESS DATA</strong></div>
+          <div class="observer-grid">
+            <div class="observer-card"><span>Monitored process</span><strong>InDesign</strong></div>
+            <div class="observer-card"><span>PID</span><strong id="po-pid">--</strong></div>
+            <div class="observer-card"><span>Probe</span><strong id="po-probe">--</strong></div>
+            <div class="observer-card"><span>Monitor elapsed</span><strong id="po-monitor-elapsed">--:--:--</strong></div>
+            <div class="observer-card"><span>Process uptime</span><strong id="po-uptime">--:--:--</strong></div>
+            <div class="observer-card"><span>Samples</span><strong id="po-samples">--</strong></div>
+            <div class="observer-card"><span>Trend coverage</span><strong id="po-coverage">--:--:--</strong></div>
+            <div class="observer-card"><span>Required</span><strong id="po-required">--:--:--</strong></div>
+          </div>
+          <div class="observer-note">
+            <span>Heartbeat</span><b>not published by this job</b>
+          </div>
+          <div class="path-line" id="po-csv-path">CSV path pending…</div>
         </div>
 
         <div class="job-detail hero-grid">
@@ -86,10 +104,10 @@
           </div>
         </div>
 
-        <div class="spark-card">
+        <div id="memory-spark-card" class="spark-card">
           <div class="spark-head"><span>Private memory history</span><strong id="memory-coverage">collecting…</strong></div>
           <svg id="memory-spark" class="sparkline" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
-          <div class="spark-foot"><span>least-squares slope after coverage floor</span><strong id="memory-slope-foot">collecting…</strong></div>
+          <div class="spark-foot"><span id="memory-qualification">raw samples · trend not yet qualified</span><strong id="memory-slope-foot">collecting…</strong></div>
         </div>
 
         <div class="metric-grid two runtime-metrics">
@@ -122,9 +140,10 @@
           <div id="trend-arrow" class="trend-arrow">→</div>
         </div>
 
-        <div class="spark-card">
+        <div id="rate-spark-card" class="spark-card">
           <div class="spark-head"><span>Throughput</span><strong id="rate-now">-- tgt/min</strong></div>
           <svg id="rate-spark" class="sparkline cyan" viewBox="0 0 400 72" preserveAspectRatio="none"></svg>
+          <div class="spark-foot"><span id="rate-qualification">raw samples · trend not yet qualified</span><strong id="rate-coverage">--:--:--</strong></div>
         </div>
 
         <div class="spark-card">
