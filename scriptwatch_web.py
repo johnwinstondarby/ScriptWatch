@@ -83,15 +83,29 @@ class DashboardState:
         self.worker.start()
 
     def stop(self):
+        """
+        The sampler owns the CSV handle and closes it in its own finally block,
+        so shutdown never closes the file out from under a write in progress.
+        The join budget must exceed the probe's own timeout: a PowerShell sample
+        can sit in a subprocess for up to 20 seconds, which is far longer than
+        one sample interval.
+        """
         self.stop_event.set()
         if self.worker.is_alive():
-            self.worker.join(timeout=max(2.0, self.interval + 1.0))
-        try:
-            self.monitor.csv_file.close()
-        except Exception:
-            pass
+            self.worker.join(timeout=max(30.0, self.interval + 25.0))
+            if self.worker.is_alive():
+                print("Sampler still finishing a probe; CSV will close when it returns.")
 
     def _run(self):
+        try:
+            self._sample_loop()
+        finally:
+            try:
+                self.monitor.csv_file.close()
+            except Exception:
+                pass
+
+    def _sample_loop(self):
         while not self.stop_event.is_set():
             started = time.time()
             try:
@@ -115,80 +129,77 @@ class DashboardState:
             self.stop_event.wait(wait_for)
 
     def _build_payload(self, snap):
+        """
+        Every derived value comes from Monitor.snapshot(), which is the single
+        source of truth shared with the console. Re-deriving trends here would
+        let the dashboard and the console disagree about the same run.
+        """
         monitor = self.monitor
-        proc = snap["proc"]
-        mem_slope = monitor.memory_trend()
-        throughput_trend, throughput_ratio = monitor.throughput_trend()
-        state, status_note = monitor.status()
-
-        target = monitor.hb.get("target")
-        total = monitor.hb.get("total")
-        passed = monitor.hb.get("pass")
-        failed = monitor.hb.get("fail")
-        elapsed = monitor.hb.get("elapsedSeconds")
-        average_ms = monitor.hb.get("averageTargetMs")
-        pct = None
-        if isinstance(target, (int, float)) and isinstance(total, (int, float)) and total:
-            pct = max(0.0, min(100.0, 100.0 * float(target) / float(total)))
+        state = monitor.snapshot(snap)
 
         finish_at = None
-        if snap.get("eta") is not None:
-            finish_at = datetime.fromtimestamp(time.time() + snap["eta"]).strftime("%I:%M %p").lstrip("0")
+        if state["eta"] is not None:
+            finish_at = datetime.fromtimestamp(
+                time.time() + state["eta"]).strftime("%I:%M %p").lstrip("0")
 
-        alerts = monitor.alerts(mem_slope, throughput_trend, throughput_ratio)
-        heartbeat_age = monitor.hb.age
-        heartbeat_path = monitor.hb.path or ""
+        percent = state["percent"]
+        if percent is not None:
+            percent = max(0.0, min(100.0, percent))
 
         return {
-            "timestamp": snap["ts"],
-            "iso": datetime.fromtimestamp(snap["ts"]).astimezone().isoformat(timespec="seconds"),
+            "timestamp": state["sampled_at"],
+            "iso": datetime.fromtimestamp(state["sampled_at"]).astimezone().isoformat(timespec="seconds"),
             "job": {
-                "name": monitor.hb.get("job") or "InDesign process telemetry",
-                "status": state,
-                "statusNote": status_note,
-                "target": _safe_int(target),
-                "total": _safe_int(total),
-                "percent": pct,
-                "pass": _safe_int(passed),
-                "fail": _safe_int(failed),
-                "elapsedSeconds": _safe_float(elapsed),
-                "averageTargetMs": _safe_float(average_ms),
-                "ratePerMin": _safe_float(snap.get("rate")),
-                "etaSeconds": _safe_float(snap.get("eta")),
+                "name": state["job"] or "InDesign process telemetry",
+                "status": state["status"],
+                "statusNote": state["status_note"],
+                "target": _safe_int(state["target"]),
+                "total": _safe_int(state["total"]),
+                "percent": percent,
+                "pass": _safe_int(state["passed"]),
+                "fail": _safe_int(state["failed"]),
+                "elapsedSeconds": _safe_float(state["elapsed"]),
+                "averageTargetMs": _safe_float(state["average_target_ms"]),
+                "ratePerMin": _safe_float(state["rate_per_min"]),
+                "etaSeconds": _safe_float(state["eta"]),
                 "finishAt": finish_at,
-                "lastCheckpoint": monitor.hb.get("lastCheckpoint"),
-                "heartbeatAgeSeconds": _safe_float(heartbeat_age),
-                "heartbeatPath": heartbeat_path,
-                "heartbeatSeen": bool(monitor.hb.ever_seen),
-                "heartbeatWrites": monitor.hb.get("writes"),
-                "host": monitor.hb.get("host") or "",
+                "lastCheckpoint": state["checkpoint"],
+                "heartbeatAgeSeconds": _safe_float(state["heartbeat_age"]),
+                "heartbeatPath": state["heartbeat_path"] or "",
+                "heartbeatSeen": bool(state["heartbeat_seen"]),
+                "heartbeatWrites": state["writes"],
+                "host": state["host"] or "",
                 "note": monitor.hb.get("note") or "",
             },
             "process": {
-                "pid": int(monitor.pid),
-                "backend": _backend_name(monitor.probe),
-                "uptimeSeconds": _safe_float(monitor.probe.uptime),
-                "cpuPct": _safe_float(proc.get("cpu")),
-                "privateMb": _safe_float(proc.get("private_mb")),
-                "peakPrivateMb": _safe_float(monitor.peak_private),
-                "workingMb": _safe_float(proc.get("working_mb")),
-                "pagefileMb": _safe_float(proc.get("pagefile_mb")),
-                "threads": _safe_int(proc.get("threads")),
-                "handles": _safe_int(proc.get("handles")),
-                "responding": snap.get("responding"),
+                "pid": _safe_int(state["pid"]),
+                "backend": state["probe"],
+                "uptimeSeconds": _safe_float(state["uptime"]),
+                "cpuPct": _safe_float(state["cpu"]),
+                "privateMb": _safe_float(state["private_mb"]),
+                "peakPrivateMb": _safe_float(state["peak_private_mb"]),
+                "workingMb": _safe_float(state["working_mb"]),
+                "pagefileMb": _safe_float(state["pagefile_mb"]),
+                "threads": _safe_int(state["threads"]),
+                "handles": _safe_int(state["handles"]),
+                "responding": state["responding"],
             },
             "trends": {
-                "memorySlopeMbHour": _safe_float(mem_slope),
-                "throughput": throughput_trend,
-                "throughputRatio": _safe_float(throughput_ratio),
-                "trendWindowSeconds": monitor.args.trend_window,
+                "memorySlopeMbHour": _safe_float(state["memory_slope"]),
+                "memoryCollecting": state["memory_collecting"],
+                "throughput": state["throughput_trend"],
+                "throughputRatio": _safe_float(state["throughput_ratio"]),
+                "throughputCollecting": state["throughput_collecting"],
+                "coverageSeconds": _safe_float(state["coverage"]),
+                "coverageRequiredSeconds": _safe_float(state["coverage_required"]),
+                "trendWindowSeconds": state["trend_window"],
             },
-            "alerts": alerts,
+            "alerts": state["alerts"],
             "monitor": {
-                "samples": monitor.samples,
+                "samples": state["samples"],
                 "started": monitor.started,
-                "csvPath": monitor.csv_path,
-                "watchBytes": snap.get("watch_bytes"),
+                "csvPath": state["csv_path"],
+                "watchBytes": state["watch_bytes"],
                 "directory": monitor.dir,
             },
         }
@@ -249,20 +260,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 
 def make_monitor_args(args):
-    return SimpleNamespace(
-        heartbeat=args.heartbeat,
-        pid=args.pid,
-        process=args.process,
-        interval=args.interval,
-        stall=args.stall,
-        trend_window=args.trend_window,
-        mem_alert=args.mem_alert,
-        watch=args.watch,
-        csv=args.csv,
-        dir=args.dir,
-        once=False,
-        no_clear=True,
-    )
+    """
+    Start from the collector's own parser defaults, then apply whatever the
+    dashboard was given. A new flag in scriptwatch.build_parser() reaches the
+    web layer without a matching edit here.
+    """
+    values = vars(scriptwatch.build_parser().parse_args([]))
+    for key, value in vars(args).items():
+        if key in values and value is not None:
+            values[key] = value
+    values.update({"once": False, "no_clear": True, "report": None})
+    return SimpleNamespace(**values)
 
 
 def main(argv=None):
@@ -314,6 +322,10 @@ def main(argv=None):
     print("  PID:       %s" % monitor.pid)
     print("  heartbeat: %s" % (monitor.hb.path or "none - process telemetry only"))
     print("  CSV:       %s" % monitor.csv_path)
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("  WARNING:   bound to %s, not loopback. This dashboard publishes job" % args.host)
+        print("             names, DocStats file paths, and process telemetry to")
+        print("             anyone who can reach this port.")
     print("Press Ctrl+C to stop the dashboard. The observed InDesign process is not terminated.")
 
     if not args.no_browser:

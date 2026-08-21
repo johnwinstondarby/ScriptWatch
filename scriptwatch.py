@@ -61,6 +61,8 @@ DEFAULT_INTERVAL = 5.0          # seconds between samples
 DEFAULT_STALL = 180             # heartbeat age (s) before status goes STALLED
 DEFAULT_TREND_WINDOW = 1800     # seconds of history used for trend fits
 DEFAULT_MEM_ALERT = 50.0        # MB/hour slope that trips a memory warning
+MIN_TREND_SPAN = 600.0          # seconds of coverage before any slope is reported
+MIN_TREND_SAMPLES = 8           # samples required alongside that coverage
 THROUGHPUT_TOLERANCE = 0.15     # +/- fraction treated as "stable"
 MB = 1024.0 * 1024.0
 
@@ -492,8 +494,25 @@ class Monitor(object):
         cutoff = now() - self.args.trend_window
         return [p for p in history if p[0] >= cutoff]
 
+    def coverage(self):
+        """Seconds of history currently inside the trend window."""
+        pts = self._trend_window(self.mem_hist)
+        return (pts[-1][0] - pts[0][0]) if len(pts) >= 2 else 0.0
+
     def memory_trend(self):
-        return slope_per_hour(self._trend_window(self.mem_hist))
+        """
+        MB/hour slope of private bytes, or None while still collecting.
+
+        A slope is withheld until the window holds MIN_TREND_SPAN of coverage.
+        Extrapolating an hourly rate from the first minute of a run reports
+        process warm-up as a leak: InDesign allocates hard at startup, so a
+        short window yields a huge positive slope that says nothing about
+        retention across targets.
+        """
+        pts = self._trend_window(self.mem_hist)
+        if len(pts) < MIN_TREND_SAMPLES or (pts[-1][0] - pts[0][0]) < MIN_TREND_SPAN:
+            return None
+        return slope_per_hour(pts)
 
     def rate_per_min(self):
         """Targets per minute over the trailing trend window."""
@@ -509,7 +528,7 @@ class Monitor(object):
     def throughput_trend(self):
         """Compare the recent half of the window against the earlier half."""
         pts = self._trend_window(self.tgt_hist)
-        if len(pts) < 6:
+        if len(pts) < 6 or (pts[-1][0] - pts[0][0]) < MIN_TREND_SPAN:
             return None, None
         mid = len(pts) // 2
         first, second = pts[:mid + 1], pts[mid:]
@@ -648,9 +667,10 @@ class Monitor(object):
                      % ("responsive" if snap["responding"]
                         else "blocked (expected during a modal script)"))
         L.append("")
+        collecting = "collecting... %s of %s" % (hms(self.coverage()), hms(MIN_TREND_SPAN))
         L.append("Memory trend       %s"
-                 % ("%+.1f MB/hour" % mem_slope if mem_slope is not None else "collecting..."))
-        L.append("Throughput trend   %s" % (trend or "collecting..."))
+                 % ("%+.1f MB/hour" % mem_slope if mem_slope is not None else collecting))
+        L.append("Throughput trend   %s" % (trend or collecting))
         L.append("Heartbeat age      %s"
                  % ("%d sec" % self.hb.age if self.hb.age is not None else "n/a"))
         L.append("Last checkpoint    %s" % self.hb.get("lastCheckpoint", "n/a"))
@@ -665,6 +685,68 @@ class Monitor(object):
         L.append("log: %s" % self.csv_path)
         L.append("samples: %d   %s" % (self.samples, datetime.now().strftime("%H:%M:%S")))
         return L
+
+    def snapshot(self, snap):
+        """
+        One dict carrying every derived value, for presentation layers that
+        should not re-derive any of this themselves. Fields that are not yet
+        trustworthy come back as None with a matching *_collecting flag, so a
+        dashboard can render "collecting" rather than plotting a warm-up
+        artifact as a trend.
+        """
+        proc = snap["proc"]
+        mem_slope = self.memory_trend()
+        trend, ratio = self.throughput_trend()
+        state, note = self.status()
+        target, total = self.hb.get("target"), self.hb.get("total")
+        pct = None
+        if isinstance(target, (int, float)) and isinstance(total, (int, float)) and total:
+            pct = 100.0 * target / total
+        return {
+            "job": self.hb.get("job"),
+            "status": state,
+            "status_note": note,
+            "heartbeat_path": self.hb.path,
+            "heartbeat_age": self.hb.age,
+            "heartbeat_seen": self.hb.ever_seen,
+            "host": self.hb.get("host"),
+            "writes": self.hb.get("writes"),
+            "target": target,
+            "total": total,
+            "percent": pct,
+            "passed": self.hb.get("pass"),
+            "failed": self.hb.get("fail"),
+            "checkpoint": self.hb.get("lastCheckpoint"),
+            "elapsed": self.hb.get("elapsedSeconds"),
+            "average_target_ms": self.hb.get("averageTargetMs"),
+            "rate_per_min": snap["rate"],
+            "eta": snap["eta"],
+            "pid": self.pid,
+            "probe": ("psutil" if isinstance(self.probe, PsutilProbe)
+                      else "PowerShell Get-Process"),
+            "uptime": self.probe.uptime,
+            "cpu": proc["cpu"],
+            "private_mb": proc["private_mb"],
+            "peak_private_mb": self.peak_private,
+            "working_mb": proc["working_mb"],
+            "pagefile_mb": proc["pagefile_mb"],
+            "threads": proc["threads"],
+            "handles": proc["handles"],
+            "responding": snap["responding"],
+            "memory_slope": mem_slope,
+            "memory_collecting": mem_slope is None,
+            "throughput_trend": trend,
+            "throughput_ratio": ratio,
+            "throughput_collecting": trend is None,
+            "coverage": self.coverage(),
+            "coverage_required": MIN_TREND_SPAN,
+            "trend_window": self.args.trend_window,
+            "samples": self.samples,
+            "alerts": self.alerts(mem_slope, trend, ratio),
+            "watch_bytes": snap["watch_bytes"],
+            "csv_path": self.csv_path,
+            "sampled_at": snap["ts"],
+        }
 
     def run(self):
         ansi = enable_ansi() and not self.args.no_clear
@@ -725,7 +807,12 @@ def report(path, stall_seconds):
     if mem:
         print("Private MB       start %.1f   end %.1f   peak %.1f   delta %+.1f"
               % (mem[0][1], mem[-1][1], max(v for _, v in mem), mem[-1][1] - mem[0][1]))
-        if slope is not None:
+        span = (mem[-1][0] - mem[0][0]) if len(mem) >= 2 else 0
+        if span < MIN_TREND_SPAN:
+            print("Memory slope     not reported - only %s of coverage, which is"
+                  % hms(span))
+            print("                 process warm-up rather than steady state")
+        elif slope is not None:
             verdict = ("flat - no evidence of accumulation" if abs(slope) < 5
                        else "rising - consistent with retention between targets"
                        if slope > 0 else "falling - memory returned to the OS")
@@ -761,7 +848,12 @@ def report(path, stall_seconds):
 # Entry point
 # --------------------------------------------------------------------------
 
-def main(argv=None):
+def build_parser():
+    """
+    The collector's CLI, exposed so other entry points (scriptwatch_web.py) can
+    inherit its defaults instead of restating them. A flag added here reaches
+    every front end without a second edit.
+    """
     ap = argparse.ArgumentParser(
         prog="scriptwatch",
         description="External runtime monitor for InDesign ExtendScript jobs.")
@@ -787,7 +879,11 @@ def main(argv=None):
     ap.add_argument("--once", action="store_true", help="print one snapshot and exit")
     ap.add_argument("--no-clear", action="store_true", help="append output instead of redrawing")
     ap.add_argument("--report", metavar="CSV", help="analyze a finished run and exit")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     if args.report:
         return report(args.report, args.stall)
