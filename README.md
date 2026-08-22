@@ -281,3 +281,14 @@ node tests\heartbeat_canary.js
 ```
 
 The collector canary covers heartbeat discovery, CSV-schema uniqueness, host-sample schema stability, and legacy-report compatibility. The visual-contract tests pin the source-aligned layout, Harness ON/OFF presentation, five-state vocabulary, shared state-machine load order, workbench presence, and reduced-motion behavior. The JavaScript canaries cover instrument state semantics, Harness 1.2 provenance/metrics/fail-fast behavior, and heartbeat 1.2 metric serialization, terminal state, lock release, and persistent-engine reset behavior.
+
+## License
+
+Copyright (C) 2026 John Darby
+
+ScriptWatch is free software, released under the GNU General Public License,
+version 3 or later. You may redistribute and modify it under those terms.
+See [LICENSE](LICENSE) for the full text.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY. See the GNU General Public License for details.
