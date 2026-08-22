@@ -12,7 +12,8 @@ The governing visual model is:
 - **metric motion = value change**;
 - **color = condition**;
 - **number = value**;
-- **placement = provenance**.
+- **placement = provenance**;
+- **artwork = physical form**.
 
 No animation may manufacture independence that the data contract does not expose.
 
@@ -202,6 +203,20 @@ Material effects remain subordinate to source/state hierarchy and must not obscu
 
 The target is modern instrument glass and illuminated controls rather than decorative beveling across the entire interface.
 
+### 5.2 Authored SVG instrument contract
+
+High-fidelity instruments may use authored SVG artwork rather than CSS-generated geometry. The SVG owns physical form; ScriptWatch continues to own value, condition, freshness, source identity, metric-change events, and animation timing.
+
+The first canonical asset is `dashboard/instruments/segmented-dial.svg`, governed by `docs/SEGMENTED_DIAL_SVG_CONTRACT_v0_1.md`. Its public layers are `housing`, `well`, `face-off`, `bloom`, `face-lit`, `activity`, and `glint`.
+
+The compositor must initialize value visibility explicitly. Lit artwork ships hidden so a failed compositor or never-sampled source cannot display a confident full-scale instrument.
+
+When more than one inline SVG instance is mounted in one document, every SVG `id` and every internal `href="#..."` / `url(#...)` reference must be namespaced per instance before insertion. Internal SVG identifiers are therefore never assumed globally unique.
+
+Authored activity artwork does not automatically earn motion. Its use remains subject to the indicator-independence rule. In the current CPU/RAM/Commit set, the three dials share one collector event, so their embedded `activity` layers remain disabled as liveness carriers. Local `glint` artwork may acknowledge a real metric value change.
+
+The initial runtime integration is intentionally CPU-only. The legacy CSS dial remains the fail-safe until the SVG parses, validates against the contract, is namespaced, and initializes successfully. If compositor setup fails, ScriptWatch leaves the legacy dial in place.
+
 ## 6. Instrument workbench and specimen-strip gate
 
 `dashboard/workbench.html` is the permanent no-backend visual canary for ScriptWatch instruments. It runs with a synthetic driver and does not require InDesign or a ScriptWatch process.
@@ -220,7 +235,9 @@ The specimen-strip gate checks at least these distinctions:
 10. source liveness is driven by authoritative event arrival or freshness gates;
 11. repeated copies of one condition do not create multiple equal-strength alarms;
 12. no two nominally independent carriers are manufactured from one event by phase offset, stagger, or jitter;
-13. when two carriers remain in lockstep over a long observation, their event identity is reviewed and merged if it is shared.
+13. when two carriers remain in lockstep over a long observation, their event identity is reviewed and merged if it is shared;
+14. authored SVG instances preserve their public layer contract after namespacing;
+15. compositor failure falls back to the legacy instrument without inventing a healthy state.
 
 The workbench also carries a fake Host → Process → Heartbeat → Harness rig so flow behavior can be reviewed without changing production telemetry code.
 
@@ -244,10 +261,11 @@ A tiled-console specimen may present multiple compact ScriptWatch instances simu
 - Artificial staggering, jitter, or phase offset must never simulate independent telemetry.
 - Color must encode state consistently enough to remain meaningful at reduced scale.
 - Dimensional styling must not imply liveness or condition independently of the state machine.
+- Authored artwork must not introduce autonomous animation or hidden telemetry semantics.
 - Repeated diagnostic copies of one condition must not inflate the apparent alarm count.
 
 ## 8. Layering rule
 
-The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, derive visual state, bind source motion to already-rendered events, and bind metric motion to displayed value changes, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
+The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, derive visual state, bind source motion to already-rendered events, bind metric motion to displayed value changes, and compose validated authored SVG artwork, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
 
-The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, `dashboard/material.css`, `dashboard/refinement.css`, `dashboard/spotlight.js`, and `dashboard/motion.js`. The shared state behavior contract is defined in `dashboard/instrument_state.js`.
+The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, `dashboard/material.css`, `dashboard/refinement.css`, `dashboard/instrument_compositor.css`, `dashboard/spotlight.js`, `dashboard/motion.js`, and `dashboard/instrument_compositor.js`. The shared state behavior contract is defined in `dashboard/instrument_state.js`; the first authored artwork contract is `docs/SEGMENTED_DIAL_SVG_CONTRACT_v0_1.md`.
