@@ -1,9 +1,12 @@
 /*
-ScriptWatch sample-motion bridge v0.1.0
+ScriptWatch sample-motion bridge v0.2.0
 
-Presentation-only bridge between the authoritative dashboard sample marker and
-visual liveness carriers. It does not poll the backend. Motion is triggered by
-fresh rendered samples, not by a free-running animation clock.
+Presentation-only bridge between authoritative rendered sample markers and
+visual liveness carriers. It does not poll the backend.
+
+Desk view: one rendered sample produces one bounded motion impulse.
+Wall view: motion remains continuous only while a freshness gate is open; the
+gate closes automatically if another sample does not arrive in time.
 */
 
 (() => {
@@ -15,10 +18,21 @@ fresh rendered samples, not by a free-running animation clock.
   const DEFAULT_CADENCE_MS = 1800;
   const MIN_MOTION_MS = 420;
   const MAX_MOTION_MS = 3200;
+  const MIN_WALL_CYCLE_MS = 1800;
+  const MAX_WALL_CYCLE_MS = 12000;
+  const MIN_FRESH_MS = 1500;
+  const MAX_FRESH_MS = 30000;
+
+  const params = new URLSearchParams(window.location.search);
+  const wallMode = ["wall", "noc"].includes(String(params.get("view") || "").toLowerCase());
+  document.body.classList.toggle("view-wall", wallMode);
 
   let lastSampleMarker = "";
   let lastSampleAt = null;
   let lastHeartbeatWrites = null;
+  let lastHeartbeatWriteAt = null;
+  let collectorFreshTimer = null;
+  let heartbeatFreshTimer = null;
 
   function finiteNumber(value) {
     const n = Number(value);
@@ -28,6 +42,16 @@ fresh rendered samples, not by a free-running animation clock.
   function motionDuration(cadenceMs) {
     const cadence = finiteNumber(cadenceMs) || DEFAULT_CADENCE_MS;
     return Math.max(MIN_MOTION_MS, Math.min(MAX_MOTION_MS, cadence * 0.74));
+  }
+
+  function wallCycle(cadenceMs) {
+    const cadence = finiteNumber(cadenceMs) || DEFAULT_CADENCE_MS;
+    return Math.max(MIN_WALL_CYCLE_MS, Math.min(MAX_WALL_CYCLE_MS, cadence * 1.08));
+  }
+
+  function freshnessWindow(cadenceMs) {
+    const cadence = finiteNumber(cadenceMs) || DEFAULT_CADENCE_MS;
+    return Math.max(MIN_FRESH_MS, Math.min(MAX_FRESH_MS, cadence * 2.6));
   }
 
   function eligible(node) {
@@ -50,9 +74,40 @@ fresh rendered samples, not by a free-running animation clock.
     return raw === "" ? null : finiteNumber(raw);
   }
 
+  function openFreshnessGate(kind, cadenceMs) {
+    const className = kind === "heartbeat" ? "wall-heartbeat-fresh" : "wall-collector-fresh";
+    const cycleName = kind === "heartbeat" ? "--sw-wall-heartbeat-cycle" : "--sw-wall-cycle";
+    const cycleMs = wallCycle(cadenceMs);
+    const ttlMs = freshnessWindow(cadenceMs);
+
+    document.body.style.setProperty(cycleName, `${Math.round(cycleMs)}ms`);
+    document.body.classList.add(className);
+
+    if (kind === "heartbeat") {
+      if (heartbeatFreshTimer) window.clearTimeout(heartbeatFreshTimer);
+      heartbeatFreshTimer = window.setTimeout(() => {
+        document.body.classList.remove(className);
+        heartbeatFreshTimer = null;
+      }, ttlMs);
+    } else {
+      if (collectorFreshTimer) window.clearTimeout(collectorFreshTimer);
+      collectorFreshTimer = window.setTimeout(() => {
+        document.body.classList.remove(className);
+        collectorFreshTimer = null;
+      }, ttlMs);
+    }
+  }
+
   function syncHeartbeatAnnunciation() {
     const absent = Boolean(byId("job-panel")?.classList.contains("process-only"));
     document.body.classList.toggle("heartbeat-absent", absent);
+    if (absent) {
+      document.body.classList.remove("wall-heartbeat-fresh");
+      if (heartbeatFreshTimer) {
+        window.clearTimeout(heartbeatFreshTimer);
+        heartbeatFreshTimer = null;
+      }
+    }
   }
 
   function pulseCollectorSources(durationMs) {
@@ -83,12 +138,22 @@ fresh rendered samples, not by a free-running animation clock.
 
     syncHeartbeatAnnunciation();
     pulseCollectorSources(durationMs);
+    openFreshnessGate("collector", cadenceMs);
 
     const heartbeatWrites = heartbeatWriteValue();
     const heartbeatChanged = heartbeatWrites !== null && (
       lastHeartbeatWrites === null ? heartbeatWrites > 0 : heartbeatWrites !== lastHeartbeatWrites
     );
-    if (heartbeatChanged) pulseHeartbeatSources(durationMs);
+
+    if (heartbeatChanged) {
+      const heartbeatCadenceMs = lastHeartbeatWriteAt === null
+        ? cadenceMs
+        : Math.max(1, now - lastHeartbeatWriteAt);
+      lastHeartbeatWriteAt = now;
+      pulseHeartbeatSources(motionDuration(heartbeatCadenceMs));
+      openFreshnessGate("heartbeat", heartbeatCadenceMs);
+    }
+
     if (heartbeatWrites !== null) lastHeartbeatWrites = heartbeatWrites;
   }
 
