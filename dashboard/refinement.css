@@ -1,0 +1,231 @@
+/*
+ScriptWatch behavior/layout refinement layer v0.1.0
+
+Loaded after material.css. This layer separates desk and wall liveness behavior,
+binds source-path motion to the destination source, and removes empty bordered
+chassis below active instruments.
+*/
+
+:root {
+  --sw-wall-cycle: 5200ms;
+  --sw-wall-heartbeat-cycle: 5200ms;
+}
+
+/* ------------------------------------------------------------
+   Source path semantics: a lane is healthy only if the source it
+   feeds is healthy. A live Process source cannot visually deliver
+   a packet into a dormant Heartbeat node.
+   ------------------------------------------------------------ */
+.source-node:not(:last-child) {
+  --sw-lane-color: #243239;
+}
+.source-node:has(+ .source-node.state-live) {
+  --sw-lane-color: var(--sw-console-green);
+}
+.source-node:has(+ .source-node.state-limit) {
+  --sw-lane-color: var(--sw-console-limit);
+}
+.source-node:has(+ .source-node.state-dormant) {
+  --sw-lane-color: #3b3320;
+}
+.source-node:has(+ .source-node.state-fault) {
+  --sw-lane-color: #71343a;
+}
+.source-node:has(+ .source-node.state-never),
+.source-node:has(+ .source-node.state-unsupported) {
+  --sw-lane-color: #26333a;
+}
+
+.source-node:not(:last-child)::after {
+  opacity: .24 !important;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.13), transparent 48%),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--sw-lane-color) 48%, #071015),
+      var(--sw-lane-color) 48%,
+      color-mix(in srgb, var(--sw-lane-color) 32%, #071015),
+      transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 0 4px color-mix(in srgb, var(--sw-lane-color) 22%, transparent) !important;
+}
+.source-node:has(+ .source-node.state-live)::after,
+.source-node:has(+ .source-node.state-limit)::after {
+  opacity: .46 !important;
+}
+.source-node:has(+ .source-node.state-dormant)::after {
+  opacity: .18 !important;
+}
+
+.source-node:not(:last-child)::before {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.82) 0 15%, rgba(255,255,255,.18) 28%, transparent 44%),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--sw-lane-color) 45%, #03100a),
+      var(--sw-lane-color) 48%,
+      color-mix(in srgb, var(--sw-lane-color) 50%, #fff) 55%,
+      var(--sw-lane-color) 72%,
+      color-mix(in srgb, var(--sw-lane-color) 50%, #020506)) !important;
+  box-shadow:
+    0 0 8px color-mix(in srgb, var(--sw-lane-color) 55%, transparent),
+    0 1px 2px rgba(0,0,0,.72) !important;
+}
+
+/* The earlier sample-pulse selector keys from the source node. This later
+   gate requires the destination to be live as well. */
+.source-node.sample-pulse:not(:has(+ .source-node.state-live)):not(:has(+ .source-node.state-limit))::before {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
+/* ------------------------------------------------------------
+   Desk mode: discrete sample impulses remain discrete.
+   A zero-valued dial still acknowledges each sample at its housing.
+   ------------------------------------------------------------ */
+@keyframes swDialSampleAck {
+  0% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.035),
+      inset 0 0 18px rgba(0,0,0,.72),
+      0 5px 13px rgba(0,0,0,.55),
+      0 0 7px color-mix(in srgb, var(--state-color) 10%, transparent);
+  }
+  32% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.065),
+      inset 0 0 18px rgba(0,0,0,.60),
+      0 5px 13px rgba(0,0,0,.55),
+      0 0 24px color-mix(in srgb, var(--state-color) 42%, transparent);
+  }
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.035),
+      inset 0 0 18px rgba(0,0,0,.72),
+      0 5px 13px rgba(0,0,0,.55),
+      0 0 18px color-mix(in srgb, var(--state-color) 14%, transparent);
+  }
+}
+body:not(.view-wall) .activity-ring.sample-hit.state-live,
+body:not(.view-wall) .activity-ring.sample-hit.state-limit {
+  animation: swDialSampleAck 620ms ease-out 1 !important;
+}
+
+/* ------------------------------------------------------------
+   Wall behavior preview. Add ?view=wall to the normal dashboard URL.
+
+   Wall motion is freshness-gated continuous motion. Speed follows observed
+   cadence; the gate disappears automatically if another sample does not arrive
+   within the freshness window. This is intentionally different from desk mode.
+   ------------------------------------------------------------ */
+@keyframes swWallCounter {
+  0% { transform: translateX(-145%); opacity: .22; }
+  18% { opacity: .82; }
+  82% { opacity: .76; }
+  100% { transform: translateX(355%); opacity: .22; }
+}
+@keyframes swWallPacket {
+  0% { transform: translateX(-58px); opacity: .20; }
+  16% { opacity: .92; }
+  84% { opacity: .78; }
+  100% { transform: translateX(15px); opacity: .20; }
+}
+@keyframes swWallMeter {
+  0% { transform: translateY(0); opacity: .16; }
+  20% { opacity: .62; }
+  78% { opacity: .50; }
+  100% { transform: translateY(-86px); opacity: .16; }
+}
+@keyframes swWallOrbit {
+  to { transform: rotate(360deg); }
+}
+
+/* Collector-fed counters and meters stay in slow motion while collector
+   freshness remains valid. */
+body.view-wall.wall-collector-fresh .counter-card[data-source="host"].state-live::after,
+body.view-wall.wall-collector-fresh .counter-card[data-source="host"].state-limit::after,
+body.view-wall.wall-collector-fresh .counter-card[data-source="process"].state-live::after,
+body.view-wall.wall-collector-fresh .counter-card[data-source="process"].state-limit::after {
+  animation: swWallCounter var(--sw-wall-cycle) linear infinite !important;
+  opacity: .82 !important;
+}
+body.view-wall.wall-collector-fresh .capacity-meter.state-live .capacity-fill::after,
+body.view-wall.wall-collector-fresh .capacity-meter.state-limit .capacity-fill::after {
+  animation: swWallMeter var(--sw-wall-cycle) linear infinite !important;
+  opacity: .58 !important;
+}
+
+/* Host -> Process uses collector freshness. Process -> Heartbeat and
+   Heartbeat -> Harness require heartbeat freshness and a live destination. */
+body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-live:has(+ .source-node.state-live)::before,
+body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-limit:has(+ .source-node.state-live)::before {
+  animation: swWallPacket var(--sw-wall-cycle) linear infinite !important;
+  opacity: .9 !important;
+}
+body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-live:has(+ .source-node.state-live)::before,
+body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-limit:has(+ .source-node.state-live)::before,
+body.view-wall.wall-heartbeat-fresh .source-node[data-source="heartbeat"].state-live:has(+ .source-node.state-live)::before,
+body.view-wall.wall-heartbeat-fresh .source-node[data-source="heartbeat"].state-limit:has(+ .source-node.state-live)::before {
+  animation: swWallPacket var(--sw-wall-heartbeat-cycle) linear infinite !important;
+  opacity: .9 !important;
+}
+
+/* Zero-valued CPU and other bounded collector dials remain visibly alive in
+   wall mode because the tracer does not depend on ring fill magnitude. The job
+   progress ring is deliberately excluded until its heartbeat-specific motion
+   contract is exercised with a real Harness job. */
+body.view-wall.wall-collector-fresh #cpu-gauge.state-live::after,
+body.view-wall.wall-collector-fresh #cpu-gauge.state-limit::after,
+body.view-wall.wall-collector-fresh #ram-gauge.state-live::after,
+body.view-wall.wall-collector-fresh #ram-gauge.state-limit::after,
+body.view-wall.wall-collector-fresh #commit-gauge.state-live::after,
+body.view-wall.wall-collector-fresh #commit-gauge.state-limit::after {
+  animation: swWallOrbit var(--sw-wall-cycle) linear infinite !important;
+  opacity: .96 !important;
+  transition: none !important;
+}
+
+body.view-wall.wall-heartbeat-fresh #job-metric-bank .counter-card.state-live::after,
+body.view-wall.wall-heartbeat-fresh #job-metric-bank .counter-card.state-limit::after {
+  animation: swWallCounter var(--sw-wall-heartbeat-cycle) linear infinite !important;
+  opacity: .82 !important;
+}
+
+/* ------------------------------------------------------------
+   Chassis density. Bordered columns end with their instruments instead of
+   stretching to the footer and reading as powered-off bays.
+   ------------------------------------------------------------ */
+.dashboard-grid {
+  align-items: start;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.008), transparent 24%),
+    repeating-linear-gradient(90deg, rgba(88,118,129,.018) 0 1px, transparent 1px 32px);
+}
+.column-panel {
+  align-self: start;
+  height: auto;
+  min-height: 0;
+}
+.dashboard-grid:has(#job-panel.process-only) {
+  grid-template-columns: .88fr 1.06fr 1.06fr;
+}
+
+@media (max-width:1180px) {
+  .dashboard-grid,
+  .dashboard-grid:has(#job-panel.process-only) {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.view-wall.wall-collector-fresh .counter-card::after,
+  body.view-wall.wall-collector-fresh .capacity-fill::after,
+  body.view-wall.wall-collector-fresh .source-node::before,
+  body.view-wall.wall-heartbeat-fresh .counter-card::after,
+  body.view-wall.wall-heartbeat-fresh .source-node::before,
+  body.view-wall.wall-collector-fresh #cpu-gauge::after,
+  body.view-wall.wall-collector-fresh #ram-gauge::after,
+  body.view-wall.wall-collector-fresh #commit-gauge::after {
+    animation: none !important;
+  }
+}
