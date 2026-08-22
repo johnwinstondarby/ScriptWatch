@@ -2,9 +2,19 @@
 
 **Status:** Draft visual contract for the instrument-console dashboard.
 
-The ScriptWatch dashboard is a live operations console. Motion, color, illumination, placement, and source labeling communicate telemetry state and provenance and must remain semantically tied to data freshness.
+The ScriptWatch dashboard is a live operations console. Motion, color, illumination, placement, and source labeling communicate telemetry state and provenance and must remain semantically tied to real observations.
 
-The console is designed for two viewing distances. At operator distance, the numbers, provenance, trends, and labels support diagnosis. At NOC distance, motion and condition color must be sufficient to identify a stopped or unhealthy signal without reading text.
+The console is designed for two viewing distances. At operator distance, numbers, provenance, trends, and labels support diagnosis. At NOC distance, motion and condition color must be sufficient to identify a stopped or unhealthy source without reading text.
+
+The governing visual model is:
+
+- **source motion = acquisition liveness**;
+- **metric motion = value change**;
+- **color = condition**;
+- **number = value**;
+- **placement = provenance**.
+
+No animation may manufacture independence that the data contract does not expose.
 
 ## 1. Instrument data-state vocabulary
 
@@ -13,9 +23,9 @@ Every value-bearing instrument uses the same five-state behavior contract.
 | State | Color | Motion | Value rule | Meaning |
 |---|---|---|---|---|
 | `NEVER_SAMPLED` | neutral gray | none | show em dash; never invent zero | no sample has ever arrived |
-| `LIVE` | restrained green | active | show current value | fresh telemetry is arriving |
+| `LIVE` | restrained green | source liveness or truthful metric change only | show current value | fresh telemetry is available |
 | `DORMANT` | amber | stopped | retain and dim last known value | a previously sampled source is no longer fresh |
-| `AT_LIMIT` | orange | active | show current bounded value | fresh telemetry has reached the instrument's declared bound |
+| `AT_LIMIT` | orange | source liveness or truthful metric change only | show current bounded value | fresh telemetry has reached the declared bound |
 | `FAULT` | red | stopped | withhold current value | the source reported an error rather than a trustworthy value |
 
 `NEVER_SAMPLED` and a legitimate zero are different states. Zero is displayed only after a real sample reports zero.
@@ -36,69 +46,65 @@ The shared behavior implementation lives in `dashboard/instrument_state.js`.
 
 ## 2. Motion contract
 
-Instrument motion is data-driven.
+Motion is evidence, not decoration.
 
-- Fresh `LIVE` samples keep the instrument moving.
-- `AT_LIMIT` is still live, so bounded instruments continue moving while orange identifies the limit condition.
-- `DORMANT`, `FAULT`, and `NEVER_SAMPLED` stop instrument motion.
-- When the sampler exceeds its stale threshold, previously sampled instruments transition to `DORMANT` and retain their last known values.
-- Known source failure transitions the affected instrument to `FAULT` and withholds the current live value.
-- `prefers-reduced-motion` disables continuous animation without changing state color, value rules, or text labels.
+A moving object must correspond to an observable event or a freshness gate derived from observable events. Artificial staggering, random jitter, phase offsets, and decorative free-running animation are prohibited when they create the appearance of independent telemetry.
 
-Perpetual decorative animation without a live source is prohibited.
+### 2.1 Indicator independence rule
 
-### 2.1 NOC-distance observability gate
+An independent liveness carrier is justified only when the data contract exposes an independently observable event identity, timestamp, sequence, write count, or equivalent freshness surface for that source.
+
+If two visual carriers are always driven by the same event, they represent one liveness fact and should normally be drawn as one carrier.
+
+The practical review rule is:
+
+> An indicator earns independent motion only when the underlying data can disagree with its neighbors.
+
+Perfect lockstep across a long observation is a diagnostic signal. Review whether the indicators share one acquisition event. If they do, merge the liveness carrier rather than adding stagger or jitter.
+
+### 2.2 Current ScriptWatch acquisition boundaries
+
+The current browser contract receives Host and InDesign process telemetry together in one `Monitor.tick()` payload with one rendered sample timestamp. Host and Process therefore share one collector liveness carrier.
+
+Heartbeat writes are independently observable from collector sampling through the heartbeat write count. Heartbeat therefore owns a separate liveness carrier.
+
+Harness semantic telemetry is transported through the heartbeat. Harness does not receive a second liveness animation merely because the heartbeat updated. Harness metric cards may show metric-change motion when their own displayed values change.
+
+If future collector work exposes independent Host and Process timestamps or event identities, separate carriers may be introduced then.
+
+### 2.3 Source liveness versus metric change
+
+Source-level motion answers: **Is fresh acquisition activity occurring?**
+
+Metric-level motion answers: **Did this value change?**
+
+Within a counter bank, counters that share one source sample do not each receive a liveness pulse. The source carrier owns freshness. Individual counters move only when their own values change.
+
+This produces truthful visual texture. A rapidly changing thread count may move frequently while a stable GDI object count remains quiet, even though both continue to receive fresh samples from the same live source.
+
+The same rule applies to dials and meters. A stable `CPU = 0.0%` does not need artificial metric motion. Collector source motion proves freshness; the dial's green state and numeric zero report condition and value. If CPU changes, the dial may acknowledge that change locally.
+
+### 2.4 Desk and wall modes
+
+Desk view uses discrete source impulses. One authoritative source event produces one bounded source motion event. This exposes acquisition cadence directly.
+
+Wall view uses freshness-gated continuous **source** motion. A fresh source event opens or renews a liveness gate. While the gate is open, the source carrier moves continuously at a speed derived from observed cadence. If fresh events stop, the gate expires and source motion stops automatically.
+
+Individual metric carriers remain change-driven in both views. Wall mode must not convert an entire counter bank into continuously moving decoration.
+
+### 2.5 NOC-distance observability gate
 
 ScriptWatch inherits the operating principle used by successful Spotlight deployments in high-density NOC environments: **motion communicates liveness; color communicates condition**.
 
-A primary instrument passes the NOC-distance gate only when an operator can determine, without reading its number or label, whether the monitored signal is alive and whether its condition is normal.
+At NOC distance an operator should be able to determine, without reading body text:
 
-The distance-view contract is:
-
-- green + motion = fresh and normal;
-- amber + stopped motion = dormant or stale, with the last known value retained for close inspection;
-- orange + motion = fresh but at a declared limit;
-- red + stopped motion = fault;
-- gray + no motion = never sampled or capability absent, with explicit capability labeling available at operator distance.
-
-The numerical value is diagnostic detail rather than the liveness signal. A value that remains unchanged across many samples must still show visible live motion while fresh samples arrive.
-
-Every primary live instrument therefore requires an **activity carrier** appropriate to its form:
-
-- segmented dial: rotating or circulating tracer;
-- flow lane: travelling segments;
-- counter: moving runner or equivalent sample-life indicator independent of value change;
-- meter: travelling highlight through the active scale;
-- source path: travelling packet/dash between acquisition stages;
-- history panel: retained history remains static, while a sample-edge cursor or equivalent live acquisition marker may indicate fresh arrival.
-
-Activity carriers stop independently with the source that feeds them. A dormant Harness lane must not stop healthy host/process motion, and a process fault must not falsely mark healthy historical data as live.
-
-### 2.2 Sample-arrival motion
-
-Primary liveness motion is driven by sample arrival rather than by a free-running animation clock.
-
-One rendered sample produces one motion impulse or one bounded traverse. The duration may be derived from observed sample cadence so a slow probe visibly moves more slowly and a fast probe produces more frequent motion. If sample arrival stops, no new liveness impulse is generated.
-
-Collector-driven host/process carriers and heartbeat/Harness carriers remain source-specific. A collector sample does not create Heartbeat or Harness motion unless the heartbeat write state advanced with that sample.
-
-A moving carrier may finish its current sample impulse after the final sample. It must not start another traverse until a new authoritative sample arrives.
-
-### 2.3 Tiled-console legibility
-
-ScriptWatch must remain interpretable when multiple consoles are tiled on a large display or when the dashboard is viewed from across a room.
-
-At reduced scale, the following must remain visible without reading body text:
-
-1. whether each critical source is moving;
-2. whether any critical source is amber, orange, or red rather than green;
+1. which acquisition sources are alive;
+2. whether any source is amber, orange, or red rather than green;
 3. whether Harness participation is ON or OFF;
-4. which major bay owns the abnormal signal;
-5. whether a fault is local to one source or has propagated across the acquisition path.
+4. where the acquisition chain breaks;
+5. which metrics are actively changing when viewed more closely.
 
-Fine typography, exact counts, paths, and trend detail are secondary at this distance. The visual hierarchy must preserve state and motion before text.
-
-The nominal wall should remain visually quiet between motion impulses. Permanent bright underlines or decorative lights are prohibited when they reduce the contrast of a true exception.
+The nominal wall should remain visually quiet. Healthy liveness should read as a small number of coherent source carriers rather than a field of synchronized green activity.
 
 ## 3. Source bus and Harness state
 
@@ -109,9 +115,17 @@ The console exposes the acquisition architecture as a source bus:
 3. heartbeat telemetry;
 4. ScriptWatch Harness telemetry.
 
-Each source has its own lamp and state label. Source capability and source freshness remain distinguishable.
+Source nodes carry state and provenance. Travelling lane packets carry independently supported acquisition or semantic-change events.
 
-Harness participation is also exposed as a top-level operator indicator because it changes the semantic depth of the observation:
+In the current implementation:
+
+- Host → Process represents the shared collector sample containing host and process telemetry;
+- Process → Heartbeat represents heartbeat-write liveness;
+- Heartbeat → Harness moves only for a real Harness semantic metric change, not as a duplicate heartbeat carrier.
+
+A source-bus segment may carry motion only when the destination it feeds is live or at limit. A healthy upstream source must not visually deliver into a dormant, faulted, never-sampled, or unsupported downstream source.
+
+Harness participation is also exposed as a top-level operator indicator:
 
 - `HARNESS = ON` means the current job publishes the ScriptWatch Harness contract;
 - `HARNESS = OFF` means ScriptWatch is observing the job agentlessly;
@@ -133,39 +147,39 @@ Capability OFF states follow the same rule. A neutral Harness OFF indicator can 
 The reusable instrument vocabulary is:
 
 - `SegmentedDial(state, value)` for bounded ratios such as CPU, RAM, commit, and job progress;
-- `FlowLane(state, value)` for telemetry flow/rate and source-path activity;
+- `FlowLane(state, event)` for acquisition and semantic-flow activity;
 - `Counter(state, value)` for totals and point-in-time numeric values;
 - `Meter(state, value)` for bounded headroom/capacity values;
 - sparkline/history panels for retained time-series context;
 - source/capability indicators for acquisition health and Harness ON/OFF.
 
-Each primary instrument owns its own state rendering and motion behavior. The dashboard supplies authoritative state and value; individual panels do not invent local state semantics.
+Each instrument uses authoritative state and value. Individual panels do not invent local state semantics or independent event timing.
 
 Not every value earns a dial. Dense counters remain compact and readable.
 
 ### 4.1 Source-aligned counter bays
 
-Counter provenance remains visually explicit after a value leaves the source bus. Counter families are placed near the part of the console that interprets them:
+Counter provenance remains visually explicit after a value leaves the source bus:
 
 - **Host counters** stay in Runtime Health beside system RAM, commit, cache, kernel-pool, and host-capacity instruments.
-- **InDesign process counters** sit in Trends & Alerts beside process history and retention signals. This includes working set, I/O, page faults, GDI/USER objects, threads, and handles.
+- **InDesign process counters** sit in Trends & Alerts beside process history and retention signals.
 - **Harness counters** stay in Job Execution because they describe the meaning and progress of the script's work.
 
-A Harness data bay remains visible even when Harness is OFF. In that state it states that no Harness counters are published and that ScriptWatch is operating agentlessly. When Harness is ON, live Harness provenance and custom counters occupy the bay.
+A Harness data bay remains visible even when Harness is OFF. In that state it states that no Harness counters are published and that ScriptWatch is operating agentlessly.
 
 Source identity and source state are separate dimensions. A process counter remains a process counter when its data turns amber; a Harness counter remains a Harness counter when its feed goes dormant.
 
 ### 4.2 Counter indicator rule
 
-A per-counter lamp or dot must encode a real property such as counter freshness or change. Decorative dots that repeat the source bay's state without adding information are prohibited. Source-group lamps carry source health; individual counter marks are added only when they convey additional counter-level state.
+A per-counter lamp, runner, or highlight must encode a real counter-level property such as value change. Decorative marks that merely repeat the source bay's liveness are prohibited.
 
-A live counter whose numeric value has not changed still requires a liveness carrier. Value change and data freshness are separate conditions.
+A counter can remain visually still while its source remains live. That means the value has not changed, not that the source stopped sampling. Source liveness is asserted once at the acquisition level.
 
 ## 5. Color roles
 
 Color hierarchy is intentionally narrow:
 
-- green: live telemetry;
+- green: live/nominal condition;
 - amber: dormant / stale data;
 - orange: live bounded value at its declared limit;
 - red: fault;
@@ -180,48 +194,37 @@ Historical traces are contextual rather than annunciators. Their colors remain g
 
 ScriptWatch uses dimensional rendering to improve visual quality without adding another semantic channel.
 
-**Hue carries condition. Shading carries form. Motion carries liveness.**
+**Hue carries condition. Shading carries form. Motion carries liveness or truthful metric change according to scope.**
 
 A state color may be rendered as a tonal family of the same hue using gradients, highlights, shadows, bevels, reflections, and glow. Those effects may make an instrument appear illuminated, recessed, glass-covered, or machined, but they must not introduce a competing state color.
 
-The material rules are:
-
-1. a green live instrument may use dark green, nominal green, bright green, and pale green specular highlights, but it remains unambiguously green;
-2. amber, orange, red, and gray instruments receive the same dimensional treatment within their own hue families;
-3. static glow, shading, or reflection never proves liveness; only the activity carrier does;
-4. `DORMANT`, `FAULT`, and `NEVER_SAMPLED` stop their activity carriers even though dimensional shading remains visible;
-5. `AT_LIMIT` keeps its activity carrier moving because the source is still live;
-6. material effects remain subordinate to the source/state hierarchy and cannot obscure text or reduce contrast;
-7. the chassis remains relatively restrained so illuminated telemetry instruments carry the visual attention;
-8. close-range material detail may disappear at NOC distance without weakening the motion-and-color signals.
+Material effects remain subordinate to source/state hierarchy and must not obscure text, imply freshness, or create false independent activity.
 
 The target is modern instrument glass and illuminated controls rather than decorative beveling across the entire interface.
-
-The runtime material layer lives in `dashboard/material.css`. It is presentation-only and may add liveness carriers that are already authorized by the state contract, but it does not redefine state, thresholds, source provenance, or collector values.
 
 ## 6. Instrument workbench and specimen-strip gate
 
 `dashboard/workbench.html` is the permanent no-backend visual canary for ScriptWatch instruments. It runs with a synthetic driver and does not require InDesign or a ScriptWatch process.
 
-Every primary instrument family is displayed in all five data states side by side. New instrument behavior is reviewed in the workbench before it enters the runtime console.
-
 The specimen-strip gate checks at least these distinctions:
 
 1. never-sampled is visually distinct from a legitimate zero;
-2. dormant retains the last known value and stops motion;
-3. at-limit remains live and moving while using the limit color;
-4. fault stops motion and withholds the current value;
+2. dormant retains the last known value and stops source motion;
+3. at-limit remains live while using the limit color;
+4. fault stops source motion and withholds the current value;
 5. reduced-motion mode preserves state meaning without animation;
 6. source/capability labels remain truthful without backend data;
-7. an unchanged live value still carries visible liveness motion;
-8. the same instrument remains classifiable by state when viewed at reduced scale or from NOC distance;
-9. dimensional material rendering improves close-range quality without weakening the semantic hue or liveness carrier;
-10. liveness motion is triggered by sample arrival rather than a free-running visual clock;
-11. repeated copies of one condition do not create multiple equal-strength alarms.
+7. unchanged values remain still while their source can remain visibly live;
+8. metric-change carriers fire only when that metric changes;
+9. dimensional rendering improves close-range quality without weakening semantic hue;
+10. source liveness is driven by authoritative event arrival or freshness gates;
+11. repeated copies of one condition do not create multiple equal-strength alarms;
+12. no two nominally independent carriers are manufactured from one event by phase offset, stagger, or jitter;
+13. when two carriers remain in lockstep over a long observation, their event identity is reviewed and merged if it is shared.
 
 The workbench also carries a fake Host → Process → Heartbeat → Harness rig so flow behavior can be reviewed without changing production telemetry code.
 
-A future tiled-console specimen may present multiple compact ScriptWatch instances simultaneously so one stopped or non-green critical system can be identified without reading labels. This is a visual-canary requirement rather than a backend multi-instance feature.
+A tiled-console specimen may present multiple compact ScriptWatch instances simultaneously so one stopped or non-green critical system can be identified without reading labels.
 
 ## 7. Truthfulness rules
 
@@ -232,18 +235,19 @@ A future tiled-console specimen may present multiple compact ScriptWatch instanc
 - Dormant data retains last known value and is visually marked stale.
 - Faulted primary instruments withhold the current value rather than presenting stale data as current.
 - Counter source labels must reflect the acquisition path that supplied the value.
-- Harness ON/OFF is derived from actual Harness provenance in the current job payload, not from user configuration or expectation.
-- Job failure and telemetry failure are separate. A failed job does not turn healthy process/host telemetry red.
+- Harness ON/OFF is derived from actual Harness provenance in the current job payload.
+- Job failure and telemetry failure are separate.
 - Browser stale-sampler state and stale heartbeat state remain distinct concepts.
 - Counter placement may change for readability, but source ownership and metric meaning do not.
-- Motion must indicate fresh sampling rather than numeric change alone.
+- Source motion must indicate real acquisition freshness.
+- Metric motion must indicate real value change or another explicitly defined metric-level event.
+- Artificial staggering, jitter, or phase offset must never simulate independent telemetry.
 - Color must encode state consistently enough to remain meaningful at reduced scale.
 - Dimensional styling must not imply liveness or condition independently of the state machine.
-- Sample-driven carriers must not free-run between authoritative samples.
 - Repeated diagnostic copies of one condition must not inflate the apparent alarm count.
 
 ## 8. Layering rule
 
-The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, derive visual state, and bind motion to already-rendered sample events, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
+The instrument-console layer sits above the existing ScriptWatch collector/dashboard contract. It may add presentation DOM, re-parent existing counter DOM for source-aligned layout, derive visual state, bind source motion to already-rendered events, and bind metric motion to displayed value changes, but it does not change collector semantics, CSV meanings, Harness behavior, or backend alert rules.
 
-The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, `dashboard/material.css`, `dashboard/spotlight.js`, and `dashboard/motion.js`. The shared state behavior contract is defined in `dashboard/instrument_state.js`; production instruments migrate to it incrementally so visual work does not destabilize the collector.
+The current runtime implementation is loaded through `dashboard/spotlight.css`, `dashboard/spotlight_sources.css`, `dashboard/material.css`, `dashboard/refinement.css`, `dashboard/spotlight.js`, and `dashboard/motion.js`. The shared state behavior contract is defined in `dashboard/instrument_state.js`.
