@@ -54,7 +54,7 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn('next.startsWith("#")', js)
         self.assertIn("node.setAttribute(attrName, after)", js)
 
-    def test_v02_mounts_cpu_and_ram_only_and_does_not_duplicate_source_liveness(self):
+    def test_v03_mounts_cpu_and_ram_only_and_does_not_duplicate_source_liveness(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
         self.assertIn('gaugeId: "cpu-gauge"', js)
         self.assertIn('gaugeId: "ram-gauge"', js)
@@ -65,20 +65,32 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn('prefix: "cpu"', js)
         self.assertIn('prefix: "ram"', js)
 
-    def test_value_change_glint_is_local_and_initialization_is_explicit(self):
+    def test_glint_uses_rendered_string_while_raw_value_drives_magnitude(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
         self.assertIn("syncInstance(instance, true)", js)
-        self.assertIn("const changed = !initializing", js)
+        self.assertIn("function readDisplayedValue", js)
+        self.assertIn("const rawValue = readPercent(instance.gauge)", js)
+        self.assertIn("const displayedValue = readDisplayedValue(instance.valueEl)", js)
+        self.assertIn("const count = litCountFor(rawValue, state)", js)
+        self.assertIn("const displayChanged = !initializing", js)
+        self.assertIn("displayedValue !== instance.lastDisplayedValue", js)
+        self.assertIn("const stableActiveState = activeMetricState(state) && activeMetricState(previousState)", js)
+        self.assertIn("if (displayChanged && stableActiveState)", js)
+        self.assertIn("instance.lastDisplayedValue = displayedValue", js)
+        self.assertIn("instance.lastRawValue = rawValue", js)
         self.assertIn("fireGlint(instance)", js)
         self.assertIn("setSegments(instance, count)", js)
+        self.assertNotIn("value !== instance.lastValue", js)
 
-    def test_diagnostics_observe_glint_and_activity_independently(self):
+    def test_diagnostics_observe_glint_activity_and_state_transition_eligibility(self):
         js = (DASHBOARD / "instrument_diagnostics.js").read_text(encoding="utf-8")
         self.assertNotIn("fetch(", js)
         self.assertIn("eligibleValueChanges", js)
         self.assertIn("glintStarts", js)
         self.assertIn("glintMatchesEligibleChanges", js)
         self.assertIn("sharedSourceActivityCorrect", js)
+        self.assertIn("previousState", js)
+        self.assertIn("activeMetricState(previousState) && activeMetricState(currentState)", js)
         self.assertIn("window.ScriptWatchInstrumentDiagnostics", js)
         self.assertIn("frameProbe", js)
         self.assertIn("use browser Performance tools for paint/composite cost", js)
@@ -92,6 +104,7 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn("function lockstep", js)
         self.assertIn("suspectedLockstep", js)
         self.assertIn("Lockstep is a diagnostic trigger", js)
+        self.assertIn("coincident glints are acceptable only when both displayed metrics genuinely changed", js)
         self.assertIn("events: eventTimeline", js)
         self.assertIn("lockstep,", js)
 
