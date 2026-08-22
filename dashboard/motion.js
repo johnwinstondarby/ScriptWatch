@@ -1,5 +1,5 @@
 /*
-ScriptWatch sample-motion bridge v0.2.0
+ScriptWatch sample-motion bridge v0.2.1
 
 Presentation-only bridge between authoritative rendered sample markers and
 visual liveness carriers. It does not poll the backend.
@@ -11,6 +11,17 @@ gate closes automatically if another sample does not arrive in time.
 
 (() => {
   "use strict";
+
+  function ensureRefinementLayer() {
+    if (document.querySelector('link[data-scriptwatch-refinement="1"]')) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "refinement.css";
+    link.dataset.scriptwatchRefinement = "1";
+    document.head.appendChild(link);
+  }
+
+  ensureRefinementLayer();
 
   const byId = id => document.getElementById(id);
   const SAMPLE_MARKER_ID = "counter-bank-state";
