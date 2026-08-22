@@ -43,14 +43,16 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn('next.startsWith("#")', js)
         self.assertIn("node.setAttribute(attrName, after)", js)
 
-    def test_v01_mounts_cpu_only_and_does_not_duplicate_source_liveness(self):
+    def test_v02_mounts_cpu_and_ram_only_and_does_not_duplicate_source_liveness(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
         self.assertIn('gaugeId: "cpu-gauge"', js)
-        self.assertNotIn('gaugeId: "ram-gauge"', js)
+        self.assertIn('gaugeId: "ram-gauge"', js)
         self.assertNotIn('gaugeId: "commit-gauge"', js)
-        self.assertIn("allowActivity: false", js)
-        self.assertIn("CPU shares the collector acquisition with RAM and Commit", js)
+        self.assertGreaterEqual(js.count("allowActivity: false"), 2)
+        self.assertIn("CPU, RAM, and Commit share one collector acquisition event", js)
         self.assertIn('gauge.classList.remove("activity-ring")', js)
+        self.assertIn('prefix: "cpu"', js)
+        self.assertIn('prefix: "ram"', js)
 
     def test_value_change_glint_is_local_and_initialization_is_explicit(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
