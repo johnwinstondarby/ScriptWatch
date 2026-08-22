@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Segmented dial v0.1 — contract verification</title>
+<style>
+:root{--ground:#070C10;--panel:#0D151A;--rule:#18242B;--ok:#31E08F;--muted:#6B828D;--faint:#41545E;
+      --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:"Inter","Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box}html,body{margin:0;background:var(--ground)}
+body{color:#C6D5DC;font-family:var(--sans);font-size:13px}
+.wrap{max-width:980px;margin:0 auto;padding:26px 22px 60px}
+h1{font-size:18px;margin:0 0 4px;font-weight:600}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin:0 0 5px}
+.lede{color:var(--muted);font-size:12.5px;margin:0;max-width:62ch;line-height:1.55}
+.ctl{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:20px 0 10px}
+.ctl label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+input[type=range]{width:170px;accent-color:var(--ok)}
+.btn{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;background:var(--panel);
+     color:var(--muted);border:1px solid #243640;border-radius:2px;padding:7px 12px;cursor:pointer}
+.btn[aria-pressed=true]{background:#13222A;color:var(--ok);border-color:#0F5E3E}
+.row{display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap;margin-top:14px;
+     background:var(--panel);border:1px solid var(--rule);padding:22px}
+.stack{text-align:center}
+.stack .cap{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-top:8px}
+.read{font-family:var(--mono);font-size:12px;color:var(--ok);min-width:52px}
+table{width:100%;border-collapse:collapse;margin-top:22px;font-size:12px}
+th,td{text-align:left;padding:7px 12px;border-bottom:1px solid var(--rule)}
+th{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:400}
+td:first-child{font-family:var(--mono);font-size:11px;white-space:nowrap}
+.pass{color:var(--ok)}.fail{color:#D6463E}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">ScriptWatch · instruments</p>
+  <h1>Segmented dial v0.1 — contract verification</h1>
+  <p class="lede">Exercises the public interface exactly as a compositor would: reveal the first
+  <code>litCount</code> children of <code>face-lit</code> and <code>bloom</code>, rotate
+  <code>activity</code>, reveal and translate <code>glint</code>. No logic lives in the SVG.</p>
+
+  <div class="ctl">
+    <label for="v">Value</label><input type="range" id="v" min="0" max="100" value="0">
+    <span class="read" id="vr">0%</span>
+    <button class="btn" id="act" aria-pressed="false">Rotate activity</button>
+    <button class="btn" id="gl">Fire glint</button>
+    <label for="bl">Bloom</label><input type="range" id="bl" min="0" max="100" value="50">
+    <span class="read" id="blr">0.50</span>
+  </div>
+
+  <div class="row">
+    <div class="stack"><div id="host140"></div><div class="cap">140 px · console size</div></div>
+    <div class="stack"><div id="host100"></div><div class="cap">100 px · dense</div></div>
+    <div class="stack"><div id="host400"></div><div class="cap">400 px · 2× inspection</div></div>
+  </div>
+
+  <table id="checks"><thead><tr><th>Check</th><th>Result</th></tr></thead><tbody></tbody></table>
+</div>
+
+<script>
+const SRC = "segmented-dial.svg";
+let instances = [];
+
+async function load(){
+  const txt = await (await fetch(SRC)).text();
+  for (const [id, px] of [["host140",140],["host100",100],["host400",400]]) {
+    const host = document.getElementById(id);
+    host.innerHTML = txt;
+    const svg = host.querySelector("svg");
+    svg.setAttribute("width", px); svg.setAttribute("height", px);
+    instances.push({
+      svg,
+      lit:  [...svg.querySelector("#face-lit").children],
+      bloom:[...svg.querySelector("#bloom").children],
+      act:   svg.querySelector("#activity"),
+      glint: svg.querySelector("#glint"),
+      bl:    svg.querySelector("#bloom")
+    });
+  }
+  runChecks();
+  setValue(0);
+}
+
+function setValue(pct){
+  const n = Math.round(pct/100*36);
+  for (const i of instances){
+    for (let k=0;k<36;k++){
+      const on = k < n;
+      i.lit[k].setAttribute("visibility",   on ? "visible" : "hidden");
+      i.bloom[k].setAttribute("visibility", on ? "visible" : "hidden");
+    }
+  }
+  document.getElementById("vr").textContent = pct + "%";
+}
+
+const v = document.getElementById("v");
+v.oninput = () => setValue(parseInt(v.value,10));
+
+const blSlider = document.getElementById("bl");
+blSlider.oninput = () => {
+  const o = parseInt(blSlider.value,10)/100;
+  instances.forEach(i => i.bl.setAttribute("opacity", o));
+  document.getElementById("blr").textContent = o.toFixed(2);
+};
+
+// activity: compositor-owned rotation. Deliberately driven from here, not the SVG.
+let spinning=false, ang=0, last=performance.now();
+const actBtn=document.getElementById("act");
+actBtn.onclick=()=>{spinning=!spinning;actBtn.setAttribute("aria-pressed",String(spinning));};
+function tick(now){
+  const dt=Math.min(.1,(now-last)/1000); last=now;
+  if(spinning){ ang=(ang+dt*52)%360;
+    instances.forEach(i=>i.act.setAttribute("transform",`rotate(${ang.toFixed(2)} 100 100)`)); }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// glint: single acknowledgement sweep, as a value-change event would trigger
+document.getElementById("gl").onclick=()=>{
+  const t0=performance.now(), DUR=620;
+  (function step(now){
+    const p=Math.min(1,(now-t0)/DUR);
+    const a=-150+p*300, o=Math.sin(p*Math.PI)*0.85;
+    instances.forEach(i=>{
+      i.glint.setAttribute("opacity",o.toFixed(3));
+      i.glint.setAttribute("transform",`rotate(${a.toFixed(2)} 100 100)`);
+    });
+    if(p<1) requestAnimationFrame(step);
+    else instances.forEach(i=>i.glint.setAttribute("opacity","0"));
+  })(t0);
+};
+
+function runChecks(){
+  const svg = instances[0].svg;
+  const ids = ["housing","well","face-off","face-lit","bloom","activity","glint"];
+  const rows = [];
+  ids.forEach(id => rows.push([`#${id} exists`, !!svg.querySelector("#"+id)]));
+  rows.push(["viewBox is 0 0 200 200", svg.getAttribute("viewBox")==="0 0 200 200"]);
+  rows.push(["face-lit has exactly 36 direct children", svg.querySelector("#face-lit").children.length===36]);
+  rows.push(["bloom mirrors 36 children",              svg.querySelector("#bloom").children.length===36]);
+  rows.push(["face-off has 36 direct children",        svg.querySelector("#face-off").children.length===36]);
+  rows.push(["no <text> elements",   svg.querySelectorAll("text").length===0]);
+  rows.push(["no <image> elements",  svg.querySelectorAll("image").length===0]);
+  rows.push(["no <script> elements", svg.querySelectorAll("script").length===0]);
+  rows.push(["no SMIL animation",    svg.querySelectorAll("animate,animateTransform,animateMotion,set").length===0]);
+  rows.push(["lit segments hidden by default",
+             [...svg.querySelector("#face-lit").children].every(c=>c.getAttribute("visibility")==="hidden")]);
+  rows.push(["activity independent of face-lit",
+             !svg.querySelector("#activity").querySelector("use")]);
+  const tb=document.querySelector("#checks tbody");
+  rows.forEach(([label,ok])=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${label}</td><td class="${ok?"pass":"fail"}">${ok?"PASS":"FAIL"}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+load();
+</script>
+</body>
+</html>
