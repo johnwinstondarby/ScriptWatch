@@ -1,10 +1,16 @@
 /*
-ScriptWatch behavior/layout refinement layer v0.1.0
+ScriptWatch behavior/layout refinement layer v0.1.1
 
 Loaded after material.css. This layer separates desk and wall liveness behavior,
 binds source-path motion to the destination source, and removes empty bordered
 chassis below active instruments.
 */
+
+@property --sw-wall-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
 
 :root {
   --sw-wall-cycle: 5200ms;
@@ -136,7 +142,8 @@ body:not(.view-wall) .activity-ring.sample-hit.state-limit {
   100% { transform: translateY(-86px); opacity: .16; }
 }
 @keyframes swWallOrbit {
-  to { transform: rotate(360deg); }
+  from { --sw-wall-angle: 0deg; }
+  to { --sw-wall-angle: 360deg; }
 }
 
 /* Collector-fed counters and meters stay in slow motion while collector
@@ -179,6 +186,7 @@ body.view-wall.wall-collector-fresh #ram-gauge.state-live::after,
 body.view-wall.wall-collector-fresh #ram-gauge.state-limit::after,
 body.view-wall.wall-collector-fresh #commit-gauge.state-live::after,
 body.view-wall.wall-collector-fresh #commit-gauge.state-limit::after {
+  transform: rotate(calc(var(--activity-angle) * 1deg + var(--sw-wall-angle))) !important;
   animation: swWallOrbit var(--sw-wall-cycle) linear infinite !important;
   opacity: .96 !important;
   transition: none !important;
