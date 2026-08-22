@@ -1,8 +1,11 @@
 /*
-ScriptWatch authored-instrument compositor layer v0.1.0
+ScriptWatch authored-instrument compositor layer v0.2.0
 
 The SVG owns physical form. Existing HTML owns numbers, labels, and accessibility.
 This layer suppresses only the legacy CSS ring once an authored SVG has mounted.
+
+Dial hue follows the instrument state. The resting scale uses a darker tonal
+version of the same condition hue so zero remains truthful and visually complete.
 */
 
 .ring-gauge.svg-instrument-mounted {
@@ -11,6 +14,17 @@ This layer suppresses only the legacy CSS ring once an authored SVG has mounted.
   box-shadow: none !important;
   overflow: visible;
   isolation: isolate;
+
+  /* Safe neutral default until the runtime state class is known. */
+  --sw-dial-off-1: #182228;
+  --sw-dial-off-2: #26333a;
+  --sw-dial-off-3: #35444c;
+  --sw-dial-lit-1: #34434a;
+  --sw-dial-lit-2: #52656e;
+  --sw-dial-lit-3: #71858e;
+  --sw-dial-lit-4: #9aabb2;
+  --sw-dial-lit-5: #d3dde1;
+  --sw-dial-bloom: #82959e;
 }
 
 .ring-gauge.svg-instrument-mounted::before,
@@ -38,7 +52,7 @@ This layer suppresses only the legacy CSS ring once an authored SVG has mounted.
 
 .ring-gauge.svg-instrument-mounted .ring-center strong {
   color: #effff8;
-  text-shadow: 0 0 10px rgba(111, 255, 187, .18), 0 1px 1px rgba(0,0,0,.8);
+  text-shadow: 0 1px 1px rgba(0,0,0,.8);
 }
 
 .ring-gauge.svg-instrument-mounted .ring-center span {
@@ -46,27 +60,124 @@ This layer suppresses only the legacy CSS ring once an authored SVG has mounted.
   text-shadow: 0 1px 1px rgba(0,0,0,.85);
 }
 
-/* State is still owned by the existing ScriptWatch state machine. The SVG
-   compositor changes its internal lit ramp; these restrained outer treatments
-   make never/fault states legible even when all value segments are hidden. */
+/* ------------------------------------------------------------
+   Condition palettes. Color conveys state; shading remains form.
+   The off ring follows state too, so a live zero is a dim green
+   instrument, dormant is amber, limit is orange, fault is red,
+   and never/unsupported remain neutral.
+   ------------------------------------------------------------ */
+.ring-gauge.svg-instrument-mounted.state-live {
+  --sw-dial-off-1: #10241b;
+  --sw-dial-off-2: #173428;
+  --sw-dial-off-3: #214a37;
+  --sw-dial-lit-1: #0A4F35;
+  --sw-dial-lit-2: #179A63;
+  --sw-dial-lit-3: #31E08F;
+  --sw-dial-lit-4: #8DF7C6;
+  --sw-dial-lit-5: #E4FFF3;
+  --sw-dial-bloom: #5CEFB0;
+}
+
+.ring-gauge.svg-instrument-mounted.state-dormant,
+.telemetry-stale .ring-gauge.svg-instrument-mounted {
+  --sw-dial-off-1: #2a2110;
+  --sw-dial-off-2: #43351a;
+  --sw-dial-off-3: #624d22;
+  --sw-dial-lit-1: #4B3210;
+  --sw-dial-lit-2: #8B5D1B;
+  --sw-dial-lit-3: #C9902D;
+  --sw-dial-lit-4: #F3C86C;
+  --sw-dial-lit-5: #FFF0C7;
+  --sw-dial-bloom: #E5AD43;
+}
+
+.ring-gauge.svg-instrument-mounted.state-limit {
+  --sw-dial-off-1: #2c190f;
+  --sw-dial-off-2: #4a2917;
+  --sw-dial-off-3: #6c3a20;
+  --sw-dial-lit-1: #4B1D0D;
+  --sw-dial-lit-2: #943815;
+  --sw-dial-lit-3: #E4682A;
+  --sw-dial-lit-4: #FF9C68;
+  --sw-dial-lit-5: #FFE1CE;
+  --sw-dial-bloom: #FF8150;
+}
+
+.ring-gauge.svg-instrument-mounted.state-fault,
+.telemetry-fault .ring-gauge.svg-instrument-mounted {
+  --sw-dial-off-1: #2a1418;
+  --sw-dial-off-2: #472027;
+  --sw-dial-off-3: #69313a;
+  --sw-dial-lit-1: #5A141C;
+  --sw-dial-lit-2: #9E2632;
+  --sw-dial-lit-3: #E44957;
+  --sw-dial-lit-4: #FF8791;
+  --sw-dial-lit-5: #FFD9DC;
+  --sw-dial-bloom: #FF6875;
+}
+
+.ring-gauge.svg-instrument-mounted.state-never,
+.ring-gauge.svg-instrument-mounted.state-unsupported {
+  --sw-dial-off-1: #182228;
+  --sw-dial-off-2: #26333a;
+  --sw-dial-off-3: #35444c;
+  --sw-dial-lit-1: #34434a;
+  --sw-dial-lit-2: #52656e;
+  --sw-dial-lit-3: #71858e;
+  --sw-dial-lit-4: #9aabb2;
+  --sw-dial-lit-5: #d3dde1;
+  --sw-dial-bloom: #82959e;
+}
+
+/* Namespaced inline SVG gradients remain controllable by suffix. These CSS
+   properties override the asset's presentation attributes without changing
+   the SVG public contract. */
+.ring-gauge.svg-instrument-mounted [id$="__grad-off"] stop:nth-child(1) { stop-color: var(--sw-dial-off-1) !important; }
+.ring-gauge.svg-instrument-mounted [id$="__grad-off"] stop:nth-child(2) { stop-color: var(--sw-dial-off-2) !important; }
+.ring-gauge.svg-instrument-mounted [id$="__grad-off"] stop:nth-child(3) { stop-color: var(--sw-dial-off-3) !important; }
+
+.ring-gauge.svg-instrument-mounted [id$="__grad-lit"] stop:nth-child(1) { stop-color: var(--sw-dial-lit-1) !important; }
+.ring-gauge.svg-instrument-mounted [id$="__grad-lit"] stop:nth-child(2) { stop-color: var(--sw-dial-lit-2) !important; }
+.ring-gauge.svg-instrument-mounted [id$="__grad-lit"] stop:nth-child(3) { stop-color: var(--sw-dial-lit-3) !important; }
+.ring-gauge.svg-instrument-mounted [id$="__grad-lit"] stop:nth-child(4) { stop-color: var(--sw-dial-lit-4) !important; }
+.ring-gauge.svg-instrument-mounted [id$="__grad-lit"] stop:nth-child(5) { stop-color: var(--sw-dial-lit-5) !important; }
+.ring-gauge.svg-instrument-mounted [data-sw-role="bloom"] { fill: var(--sw-dial-bloom) !important; }
+
+/* State is still owned by the existing ScriptWatch state machine. Outer
+   treatments reinforce condition without adding a second hue. */
+.ring-gauge.svg-instrument-mounted.state-live .ring-center strong {
+  text-shadow: 0 0 9px rgba(92,239,176,.16), 0 1px 1px rgba(0,0,0,.8);
+}
+
 .ring-gauge.svg-instrument-mounted.state-dormant .svg-instrument-art,
 .telemetry-stale .ring-gauge.svg-instrument-mounted .svg-instrument-art {
   filter: drop-shadow(0 0 5px rgba(245, 173, 50, .18)) saturate(.92);
+}
+.ring-gauge.svg-instrument-mounted.state-dormant .ring-center strong,
+.telemetry-stale .ring-gauge.svg-instrument-mounted .ring-center strong {
+  text-shadow: 0 0 9px rgba(229,173,67,.20), 0 1px 1px rgba(0,0,0,.8);
 }
 
 .ring-gauge.svg-instrument-mounted.state-limit .svg-instrument-art {
   filter: drop-shadow(0 0 6px rgba(228, 104, 42, .24));
 }
+.ring-gauge.svg-instrument-mounted.state-limit .ring-center strong {
+  text-shadow: 0 0 9px rgba(255,129,80,.22), 0 1px 1px rgba(0,0,0,.8);
+}
 
 .ring-gauge.svg-instrument-mounted.state-fault .svg-instrument-art,
 .telemetry-fault .ring-gauge.svg-instrument-mounted .svg-instrument-art {
-  filter: drop-shadow(0 0 7px rgba(255, 93, 104, .32)) saturate(.72);
+  filter: drop-shadow(0 0 7px rgba(255, 93, 104, .32)) saturate(.78);
+}
+.ring-gauge.svg-instrument-mounted.state-fault .ring-center strong,
+.telemetry-fault .ring-gauge.svg-instrument-mounted .ring-center strong {
+  text-shadow: 0 0 9px rgba(255,104,117,.24), 0 1px 1px rgba(0,0,0,.8);
 }
 
 .ring-gauge.svg-instrument-mounted.state-never .svg-instrument-art,
 .ring-gauge.svg-instrument-mounted.state-unsupported .svg-instrument-art {
   opacity: .72;
-  filter: saturate(.42) brightness(.76);
+  filter: saturate(.38) brightness(.78);
 }
 
 @media (prefers-reduced-motion: reduce) {
