@@ -65,6 +65,16 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn('prefix: "cpu"', js)
         self.assertIn('prefix: "ram"', js)
 
+    def test_authored_dial_palette_tracks_instrument_state(self):
+        css = (DASHBOARD / "instrument_compositor.css").read_text(encoding="utf-8")
+        for state in ("live", "dormant", "limit", "fault", "never", "unsupported"):
+            self.assertIn(f"state-{state}", css)
+        self.assertIn('[id$="__grad-off"] stop:nth-child(1)', css)
+        self.assertIn('[id$="__grad-lit"] stop:nth-child(5)', css)
+        self.assertIn('--sw-dial-bloom', css)
+        self.assertIn('[data-sw-role="bloom"]', css)
+        self.assertIn("The off ring follows state too", css)
+
     def test_glint_uses_rendered_string_while_raw_value_drives_magnitude(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
         self.assertIn("syncInstance(instance, true)", js)
