@@ -54,7 +54,7 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn('next.startsWith("#")', js)
         self.assertIn("node.setAttribute(attrName, after)", js)
 
-    def test_v03_mounts_cpu_and_ram_only_and_does_not_duplicate_source_liveness(self):
+    def test_v04_mounts_cpu_and_ram_only_and_does_not_duplicate_source_liveness(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
         self.assertIn('gaugeId: "cpu-gauge"', js)
         self.assertIn('gaugeId: "ram-gauge"', js)
@@ -76,35 +76,55 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn("displayedValue !== instance.lastDisplayedValue", js)
         self.assertIn("const stableActiveState = activeMetricState(state) && activeMetricState(previousState)", js)
         self.assertIn("if (displayChanged && stableActiveState)", js)
+        self.assertIn("issueGlint(instance, displayedValue, state)", js)
         self.assertIn("instance.lastDisplayedValue = displayedValue", js)
         self.assertIn("instance.lastRawValue = rawValue", js)
-        self.assertIn("fireGlint(instance)", js)
         self.assertIn("setSegments(instance, count)", js)
         self.assertNotIn("value !== instance.lastValue", js)
 
-    def test_diagnostics_observe_glint_activity_and_state_transition_eligibility(self):
+    def test_glint_semantic_event_is_issued_before_render_scheduling(self):
+        js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
+        self.assertIn("function issueGlint", js)
+        self.assertIn("instance.glintSeq += 1", js)
+        self.assertIn("glint.dataset.swGlintSeq = String(instance.glintSeq)", js)
+        self.assertIn("glint.dataset.swGlintValue = displayedValue", js)
+        self.assertIn("glint.dataset.swGlintState = state", js)
+        issue_body = js[js.index("function issueGlint"):js.index("function fireGlint")]
+        self.assertLess(issue_body.index("swGlintSeq"), issue_body.index("fireGlint(instance)"))
+        self.assertIn('instance.handles.glint.dataset.swGlintSeq = "0"', js)
+
+    def test_diagnostics_compare_issued_glints_to_independent_value_eligibility(self):
         js = (DASHBOARD / "instrument_diagnostics.js").read_text(encoding="utf-8")
         self.assertNotIn("fetch(", js)
         self.assertIn("eligibleValueChanges", js)
-        self.assertIn("glintStarts", js)
+        self.assertIn("glintEventsIssued", js)
+        self.assertIn("renderedGlintStarts", js)
         self.assertIn("glintMatchesEligibleChanges", js)
         self.assertIn("sharedSourceActivityCorrect", js)
         self.assertIn("previousState", js)
         self.assertIn("activeMetricState(previousState) && activeMetricState(currentState)", js)
+        self.assertIn('attributeFilter: ["data-sw-glint-seq"]', js)
+        self.assertIn("glintSequence(glint)", js)
+        self.assertIn("browser frame scheduling cannot erase an issued event", js)
         self.assertIn("window.ScriptWatchInstrumentDiagnostics", js)
         self.assertIn("frameProbe", js)
         self.assertIn("use browser Performance tools for paint/composite cost", js)
 
-    def test_diagnostics_timestamp_glints_and_flag_lockstep_without_claiming_causality(self):
+    def test_diagnostics_timestamp_issued_glints_and_flag_lockstep_without_claiming_causality(self):
         js = (DASHBOARD / "instrument_diagnostics.js").read_text(encoding="utf-8")
-        self.assertIn("glintEvents", js)
+        self.assertIn("glintIssueEvents", js)
+        self.assertIn("renderedGlintEvents", js)
         self.assertIn("valueEvents", js)
-        self.assertIn("glintStartTimesMs", js)
+        self.assertIn("glintIssueTimesMs", js)
+        self.assertIn("renderedGlintStartTimesMs", js)
         self.assertIn("valueChangeTimesMs", js)
         self.assertIn("function lockstep", js)
+        self.assertIn('channel: "semantic-glint-issued"', js)
         self.assertIn("suspectedLockstep", js)
         self.assertIn("Lockstep is a diagnostic trigger", js)
-        self.assertIn("coincident glints are acceptable only when both displayed metrics genuinely changed", js)
+        self.assertIn("Coincident issued glints are acceptable only when both displayed metrics genuinely changed", js)
+        self.assertIn('event: "glint-issued"', js)
+        self.assertIn('event: "glint-rendered"', js)
         self.assertIn("events: eventTimeline", js)
         self.assertIn("lockstep,", js)
 
