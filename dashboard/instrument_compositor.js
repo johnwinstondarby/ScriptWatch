@@ -1,14 +1,17 @@
 /*
-ScriptWatch instrument compositor v0.2.0
+ScriptWatch instrument compositor v0.3.0
 
 Loads authored SVG instrument artwork into the live dashboard without changing
-collector or Harness semantics. v0.2 mounts the segmented-dial asset on CPU and
+collector or Harness semantics. v0.3 mounts the segmented-dial asset on CPU and
 RAM; Commit remains on the legacy CSS dial for side-by-side acceptance.
 
-Source motion remains owned by source-level telemetry. CPU and RAM embedded
-activity carriers are intentionally disabled because CPU, RAM, and Commit
-currently share one Monitor.tick() acquisition event. Each local glint
-acknowledges only that metric's value change.
+The compositor keeps three telemetry channels distinct:
+- raw numeric value drives dial magnitude;
+- the rendered operator-visible string drives metric-change acknowledgement;
+- source events own acquisition liveness.
+
+CPU and RAM embedded activity carriers remain disabled because CPU, RAM, and
+Commit currently share one Monitor.tick() acquisition event.
 */
 
 (() => {
@@ -162,12 +165,22 @@ acknowledges only that metric's value change.
     return Math.max(0, Math.min(100, value));
   }
 
+  function readDisplayedValue(valueEl) {
+    const text = String(valueEl?.textContent || "").trim();
+    if (!text || text === "--" || text === "—") return null;
+    return text;
+  }
+
   function readState(gauge) {
     for (const state of STATE_CLASSES) {
       if (gauge.classList.contains(`state-${state}`)) return state;
     }
     if (gauge.closest(".dial-card")?.classList.contains("unavailable")) return "unsupported";
     return "never";
+  }
+
+  function activeMetricState(state) {
+    return state === "live" || state === "limit";
   }
 
   function litCountFor(value, state) {
@@ -234,13 +247,14 @@ acknowledges only that metric's value change.
 
   function syncInstance(instance, initializing = false) {
     const state = readState(instance.gauge);
-    const value = readPercent(instance.gauge);
-    const count = litCountFor(value, state);
+    const previousState = instance.lastState;
+    const rawValue = readPercent(instance.gauge);
+    const displayedValue = readDisplayedValue(instance.valueEl);
+    const count = litCountFor(rawValue, state);
 
-    if (state !== instance.lastState) {
+    if (state !== previousState) {
       if (["live", "dormant", "limit"].includes(state)) applyPalette(instance, state);
       instance.svg.dataset.swState = state;
-      instance.lastState = state;
     }
 
     if (count !== instance.lastLitCount || initializing) {
@@ -253,13 +267,24 @@ acknowledges only that metric's value change.
     // a future instrument owns an independently observable acquisition event.
     setActivityEnabled(instance, Boolean(instance.config.allowActivity));
 
-    const changed = !initializing && value !== null && instance.lastValue !== null && value !== instance.lastValue;
-    if (changed && (state === "live" || state === "limit")) {
+    const displayChanged = !initializing
+      && displayedValue !== null
+      && instance.lastDisplayedValue !== null
+      && displayedValue !== instance.lastDisplayedValue;
+    const stableActiveState = activeMetricState(state) && activeMetricState(previousState);
+
+    // A metric glint acknowledges a change the operator can see. Raw sub-display
+    // movement still updates magnitude but cannot create a visible change event.
+    // Re-entry from dormant/fault/never/unsupported is excluded because that is
+    // source recovery, which belongs to the liveness channel.
+    if (displayChanged && stableActiveState) {
       fireGlint(instance);
     }
-    if (!["live", "limit"].includes(state)) cancelGlint(instance);
+    if (!activeMetricState(state)) cancelGlint(instance);
 
-    if (value !== null) instance.lastValue = value;
+    instance.lastRawValue = rawValue;
+    instance.lastDisplayedValue = displayedValue;
+    instance.lastState = state;
   }
 
   function scheduleSync(instance) {
@@ -303,7 +328,8 @@ acknowledges only that metric's value change.
       svg,
       handles: namespaced.handles,
       internal: namespaced.internal,
-      lastValue: null,
+      lastRawValue: null,
+      lastDisplayedValue: null,
       lastState: null,
       lastLitCount: -1,
       glintToken: 0,
