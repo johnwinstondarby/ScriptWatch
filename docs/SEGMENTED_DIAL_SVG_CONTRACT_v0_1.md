@@ -38,7 +38,7 @@ Seven top-level IDs. These are stable across artwork revisions.
 | `face-off` | Complete unlit segment ring. 36 children. Always visible. |
 | `bloom` | Emissive copy of the lit ring. 36 children. Beneath `face-lit`. |
 | `face-lit` | Complete illuminated segment ring. 36 children. |
-| `activity` | Source-liveness carrier. Value-independent. |
+| `activity` | Optional independent-source liveness carrier. Value-independent. |
 | `glint` | Value-change acknowledgement. Invisible at rest. |
 
 Internal IDs (`seg-shape`, `grad-*`, `fx-*`) are implementation detail and may change.
@@ -84,8 +84,9 @@ class of defect as a counter that shows `0` when it has never been sampled.
 
 Consequence: **the compositor must set visibility on init**, not only on change.
 
-The instrument still reads as complete at zero — housing, well, scale ticks, unlit
-ring, and the activity carrier are all present and independent of value.
+The instrument still reads as complete at zero — housing, well, scale ticks, and the unlit
+ring are all present and independent of value. The `activity` geometry is available to the
+compositor but does not itself prove source liveness.
 
 ---
 
@@ -136,16 +137,20 @@ A short luminous arc on the r=76 ring, soft-ended by gradient rather than by blu
 **It carries no filter on purpose**, so the compositor can `rotate(θ 100 100)` it every
 frame without triggering a filter recomputation.
 
-Requirements it satisfies: visible at value zero, independent of `face-lit`, cheap to
-transform, no embedded animation. The compositor decides when and how fast it moves,
-and stopping it is what expresses a dead source.
+Requirements it satisfies: independent of `face-lit`, cheap to transform, no embedded
+animation. The compositor may enable it only when the instrument owns an independently
+observable freshness event. Current CPU, RAM, and Commit dials share the same collector
+sample event, so they must not each run this carrier in lockstep. Their source liveness
+is expressed once at the collector/source level; their local `glint` responds to value
+change. Artificial staggering or phase offsets are prohibited.
 
 ### glint
 A 52° band across the value ring, `opacity="0"` at rest, `mix-blend-mode: plus-lighter`.
 Reserved for **value-change acknowledgement**, which is distinct from source liveness.
 
 Transform and opacity only. An unchanged metric should simply not fire it; absence of a
-glint must not read as staleness, because staleness is `activity`'s job.
+glint must not read as staleness. Source freshness belongs to the source-liveness
+carrier, which may live outside the dial when several metrics share one acquisition event.
 
 ---
 
@@ -158,6 +163,7 @@ glint must not read as staleness, because staleness is `activity`'s job.
 5. Expensive filters on static layers only.
 6. Animatable layers respond to transform and opacity alone.
 7. Lit geometry hidden by default.
+8. Per-instrument `activity` motion requires independent event identity; shared-source metrics do not stagger or duplicate liveness.
 
 If artwork ever requires breaking one of these, document the issue and revise the
 contract before changing the file.
@@ -196,7 +202,28 @@ If the artwork is regenerated from Illustrator:
 
 ---
 
-## 9. Verification
+## 9. Multi-instance DOM isolation
+
+The production dashboard will instantiate this asset more than once. Raw inline copies
+contain duplicate internal IDs such as `grad-lit`, `seg-shape`, and `fx-bezel`, so the
+compositor must isolate or namespace every injected SVG instance before it enters the
+live document.
+
+Acceptable implementations include deterministic per-instance ID rewriting (including
+all `href` and `url(#...)` references) or another browser mechanism that gives each SVG
+a separate ID scope. Scoped `querySelector` calls alone are insufficient because SVG
+fragment references and filters also depend on IDs.
+
+The seven public IDs are the logical asset interface. A compositor that namespaces them
+at runtime must retain handles to those seven logical elements before or during the
+rewrite. The source SVG on disk keeps the exact public names defined in section 2.
+
+`dial-verify.html` deliberately loads multiple raw copies to exercise the artwork and
+interface. It is not proof that production multi-instance ID isolation has been solved.
+
+---
+
+## 10. Verification
 
 `dial-verify.html` in the same folder loads the asset, drives it exactly as a compositor
 would, and asserts the contract. It is a development aid rather than a shipped artefact.
