@@ -9,7 +9,7 @@ The console is designed for two viewing distances. At operator distance, numbers
 The governing visual model is:
 
 - **source motion = acquisition liveness**;
-- **metric motion = value change**;
+- **metric motion = operator-visible value change**;
 - **color = condition**;
 - **number = value**;
 - **placement = provenance**;
@@ -77,13 +77,29 @@ If future collector work exposes independent Host and Process timestamps or even
 
 Source-level motion answers: **Is fresh acquisition activity occurring?**
 
-Metric-level motion answers: **Did this value change?**
+Metric-level motion answers: **Did the operator-visible value change?**
 
-Within a counter bank, counters that share one source sample do not each receive a liveness pulse. The source carrier owns freshness. Individual counters move only when their own values change.
+Within a counter bank, counters that share one source sample do not each receive a liveness pulse. The source carrier owns freshness. Individual counters move only when their own displayed values change.
 
 This produces truthful visual texture. A rapidly changing thread count may move frequently while a stable GDI object count remains quiet, even though both continue to receive fresh samples from the same live source.
 
-The same rule applies to dials and meters. A stable `CPU = 0.0%` does not need artificial metric motion. Collector source motion proves freshness; the dial's green state and numeric zero report condition and value. If CPU changes, the dial may acknowledge that change locally.
+The same rule applies to dials and meters. A stable `CPU = 0.0%` does not need artificial metric motion. Collector source motion proves freshness; the dial's green state and numeric zero report condition and value. If CPU changes enough to change the value the operator sees, the dial may acknowledge that change locally.
+
+### 2.3.1 Three-way value and motion binding
+
+ScriptWatch keeps three related signals separate:
+
+- **raw numeric value drives magnitude**;
+- **the rendered string already shown to the operator drives metric-change acknowledgement**;
+- **the source event drives acquisition liveness**.
+
+The compositor must read the rendered DOM value for metric-change acknowledgement. It must not independently reformat or re-round the raw value because a second formatting path can drift from the value the operator sees.
+
+A raw value may move while its displayed string remains unchanged. For example, several CPU samples may all render as `0.1%`. Those samples can change segment magnitude where the instrument resolution permits, but they do not earn repeated metric glints when the displayed value remains `0.1%`.
+
+A metric-change glint is also suppressed for initialization, recovery from a missing value, entry into `DORMANT` or `FAULT`, and the first transition out of a non-active state back to `LIVE` or `AT_LIMIT`. Those transitions describe source/data availability and belong to the liveness/state channel rather than the metric-change channel.
+
+Timestamped diagnostics remain part of acceptance. Coincident glints across multiple metrics are acceptable only when those metrics genuinely changed their rendered values at the same time. Persistent lockstep without corresponding rendered changes is a contract failure rather than a visual-style issue.
 
 ### 2.4 Desk and wall modes
 
@@ -172,9 +188,9 @@ Source identity and source state are separate dimensions. A process counter rema
 
 ### 4.2 Counter indicator rule
 
-A per-counter lamp, runner, or highlight must encode a real counter-level property such as value change. Decorative marks that merely repeat the source bay's liveness are prohibited.
+A per-counter lamp, runner, or highlight must encode a real counter-level property such as operator-visible value change. Decorative marks that merely repeat the source bay's liveness are prohibited.
 
-A counter can remain visually still while its source remains live. That means the value has not changed, not that the source stopped sampling. Source liveness is asserted once at the acquisition level.
+A counter can remain visually still while its source remains live. That means the displayed value has not changed, not that the source stopped sampling. Source liveness is asserted once at the acquisition level.
 
 ## 5. Color roles
 
@@ -213,9 +229,9 @@ The compositor must initialize value visibility explicitly. Lit artwork ships hi
 
 When more than one inline SVG instance is mounted in one document, every SVG `id` and every internal `href="#..."` / `url(#...)` reference must be namespaced per instance before insertion. Internal SVG identifiers are therefore never assumed globally unique.
 
-Authored activity artwork does not automatically earn motion. Its use remains subject to the indicator-independence rule. In the current CPU/RAM/Commit set, the three dials share one collector event, so their embedded `activity` layers remain disabled as liveness carriers. Local `glint` artwork may acknowledge a real metric value change.
+Authored activity artwork does not automatically earn motion. Its use remains subject to the indicator-independence rule. In the current CPU/RAM/Commit set, the three dials share one collector event, so their embedded `activity` layers remain disabled as liveness carriers. Local `glint` artwork may acknowledge a real operator-visible metric value change.
 
-The initial runtime integration is intentionally CPU-only. The legacy CSS dial remains the fail-safe until the SVG parses, validates against the contract, is namespaced, and initializes successfully. If compositor setup fails, ScriptWatch leaves the legacy dial in place.
+The current runtime acceptance integration mounts authored SVG dials on CPU and RAM while Commit remains the legacy CSS control. The legacy CSS dial remains the fail-safe until each SVG parses, validates against the contract, is namespaced, and initializes successfully. If compositor setup fails, ScriptWatch leaves the legacy dial in place.
 
 ## 6. Instrument workbench and specimen-strip gate
 
@@ -229,15 +245,17 @@ The specimen-strip gate checks at least these distinctions:
 4. fault stops source motion and withholds the current value;
 5. reduced-motion mode preserves state meaning without animation;
 6. source/capability labels remain truthful without backend data;
-7. unchanged values remain still while their source can remain visibly live;
-8. metric-change carriers fire only when that metric changes;
-9. dimensional rendering improves close-range quality without weakening semantic hue;
-10. source liveness is driven by authoritative event arrival or freshness gates;
-11. repeated copies of one condition do not create multiple equal-strength alarms;
-12. no two nominally independent carriers are manufactured from one event by phase offset, stagger, or jitter;
-13. when two carriers remain in lockstep over a long observation, their event identity is reviewed and merged if it is shared;
-14. authored SVG instances preserve their public layer contract after namespacing;
-15. compositor failure falls back to the legacy instrument without inventing a healthy state.
+7. unchanged displayed values remain still while their source can remain visibly live;
+8. metric-change carriers fire only when that metric's rendered value changes;
+9. raw sub-display value changes do not create metric-change motion;
+10. recovery from dormant/fault/never/unsupported does not masquerade as metric change;
+11. dimensional rendering improves close-range quality without weakening semantic hue;
+12. source liveness is driven by authoritative event arrival or freshness gates;
+13. repeated copies of one condition do not create multiple equal-strength alarms;
+14. no two nominally independent carriers are manufactured from one event by phase offset, stagger, or jitter;
+15. when two carriers remain in lockstep over a long observation, their event identity is reviewed and merged if it is shared;
+16. authored SVG instances preserve their public layer contract after namespacing;
+17. compositor failure falls back to the legacy instrument without inventing a healthy state.
 
 The workbench also carries a fake Host → Process → Heartbeat → Harness rig so flow behavior can be reviewed without changing production telemetry code.
 
@@ -257,7 +275,9 @@ A tiled-console specimen may present multiple compact ScriptWatch instances simu
 - Browser stale-sampler state and stale heartbeat state remain distinct concepts.
 - Counter placement may change for readability, but source ownership and metric meaning do not.
 - Source motion must indicate real acquisition freshness.
-- Metric motion must indicate real value change or another explicitly defined metric-level event.
+- Metric motion must indicate an operator-visible value change or another explicitly defined metric-level event.
+- Raw numeric changes below display precision do not earn metric-change motion.
+- Initialization and source/data recovery do not earn metric-change motion.
 - Artificial staggering, jitter, or phase offset must never simulate independent telemetry.
 - Color must encode state consistently enough to remain meaningful at reduced scale.
 - Dimensional styling must not imply liveness or condition independently of the state machine.
