@@ -1,13 +1,13 @@
 /*
-ScriptWatch authored-instrument diagnostics v0.2.0
+ScriptWatch authored-instrument diagnostics v0.3.0
 
 Independent observation layer for compositor acceptance. It does not drive
 telemetry, artwork state, or motion. It records what the rendered dashboard did
 so value-change glints can be verified without relying on video timing.
 
-v0.2 adds timestamped value-change and glint-start event logs plus a lockstep
-diagnostic. Lockstep is evidence to inspect event ownership, not proof by itself
-that two metrics share a trigger.
+v0.3 keeps the v0.2 timestamped event/lockstep diagnostics and aligns glint
+eligibility with the production contract: the rendered string must change while
+both the prior and current instrument states are active (LIVE or AT_LIMIT).
 */
 
 (() => {
@@ -42,8 +42,7 @@ that two metrics share a trigger.
     return "unknown";
   }
 
-  function eligibleForGlint(gauge) {
-    const state = stateOf(gauge);
+  function activeMetricState(state) {
     return state === "live" || state === "limit";
   }
 
@@ -93,6 +92,7 @@ that two metrics share a trigger.
       valueEvents: [],
       glintEvents: [],
       lastValue: displayValue(valueNode.textContent),
+      lastState: stateOf(gauge),
       lastGlintOpacity: Number(glint.getAttribute("opacity") || 0) || 0
     };
     stats.metrics[config.key] = metric;
@@ -101,22 +101,34 @@ that two metrics share a trigger.
       const current = displayValue(valueNode.textContent);
       if (current === metric.lastValue) return;
       const previous = metric.lastValue;
+      const previousState = metric.lastState;
+      const currentState = stateOf(gauge);
       const hadPrior = previous !== null;
       metric.lastValue = current;
+      metric.lastState = currentState;
       if (!hadPrior || current === null) return;
+
       metric.valueChanges += 1;
-      const eligible = eligibleForGlint(gauge);
+      const eligible = activeMetricState(previousState) && activeMetricState(currentState);
       if (eligible) metric.eligibleValueChanges += 1;
       metric.valueEvents.push({
         tMs: elapsedMs(),
         sampleEvent: stats.sampleEvents,
         previous,
         value: current,
-        state: stateOf(gauge),
+        previousState,
+        state: currentState,
         eligible
       });
     });
     valueObserver.observe(valueNode, { childList: true, characterData: true, subtree: true });
+
+    // Keep state history current even when the displayed value is unchanged.
+    // This makes wake/recovery exclusions observable rather than inferred.
+    const stateObserver = new MutationObserver(() => {
+      metric.lastState = stateOf(gauge);
+    });
+    stateObserver.observe(gauge, { attributes: true, attributeFilter: ["class"] });
 
     const glintObserver = new MutationObserver(() => {
       const opacity = Number(glint.getAttribute("opacity") || 0) || 0;
@@ -165,17 +177,18 @@ that two metrics share a trigger.
   function lockstep(toleranceMs = 25) {
     const left = stats.metrics.cpu?.glintEvents || [];
     const right = stats.metrics.ram?.glintEvents || [];
-    const pairs = pairGlintEvents(left, right, Math.max(0, Number(toleranceMs) || 25));
+    const tolerance = Math.max(0, Number(toleranceMs) || 25);
+    const pairs = pairGlintEvents(left, right, tolerance);
     const denominator = Math.min(left.length, right.length);
     const ratio = denominator ? pairs.length / denominator : 0;
     return {
-      toleranceMs: Math.max(0, Number(toleranceMs) || 25),
+      toleranceMs: tolerance,
       cpuGlints: left.length,
       ramGlints: right.length,
       pairedGlints: pairs.length,
       pairedRatio: Number(ratio.toFixed(3)),
       suspectedLockstep: denominator >= 2 && ratio >= 0.8,
-      note: "Lockstep is a diagnostic trigger. Confirm underlying event identity before declaring a shared trigger.",
+      note: "Lockstep is a diagnostic trigger. After rendered-string binding, coincident glints are acceptable only when both displayed metrics genuinely changed.",
       pairs
     };
   }
@@ -193,6 +206,7 @@ that two metrics share a trigger.
           sampleEvent: event.sampleEvent,
           value: event.value,
           previous: event.previous,
+          previousState: event.previousState,
           state: event.state,
           eligible: event.eligible
         });
@@ -205,6 +219,7 @@ that two metrics share a trigger.
           sampleEvent: event.sampleEvent,
           value: event.value,
           previous: "",
+          previousState: "",
           state: event.state,
           eligible: ""
         });
@@ -272,6 +287,7 @@ that two metrics share a trigger.
       metric.valueEvents = [];
       metric.glintEvents = [];
       metric.lastValue = displayValue(document.getElementById(config.valueId)?.textContent);
+      metric.lastState = stateOf(document.getElementById(config.gaugeId));
       const glint = document.getElementById(config.gaugeId)?.querySelector('[data-sw-role="glint"]');
       metric.lastGlintOpacity = Number(glint?.getAttribute("opacity") || 0) || 0;
     }
