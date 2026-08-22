@@ -83,6 +83,18 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn("frameProbe", js)
         self.assertIn("use browser Performance tools for paint/composite cost", js)
 
+    def test_diagnostics_timestamp_glints_and_flag_lockstep_without_claiming_causality(self):
+        js = (DASHBOARD / "instrument_diagnostics.js").read_text(encoding="utf-8")
+        self.assertIn("glintEvents", js)
+        self.assertIn("valueEvents", js)
+        self.assertIn("glintStartTimesMs", js)
+        self.assertIn("valueChangeTimesMs", js)
+        self.assertIn("function lockstep", js)
+        self.assertIn("suspectedLockstep", js)
+        self.assertIn("Lockstep is a diagnostic trigger", js)
+        self.assertIn("events: eventTimeline", js)
+        self.assertIn("lockstep,", js)
+
     def test_failure_preserves_legacy_dial(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
         self.assertIn("failToLegacy", js)
