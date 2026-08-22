@@ -1,4 +1,4 @@
-# Segmented Dial SVG Contract v0.1 (artwork rev 0.2)
+# Segmented Dial SVG Contract v0.1 (artwork rev 0.2.1)
 
 **Asset:** `dashboard/instruments/segmented-dial.svg`
 **Status:** v0.1 — interface frozen for compositor development.
@@ -28,6 +28,8 @@ smaller and dimmer at console scale. `grad-off` was also lightened substantially
 rev 0.1's unlit ring disappeared into the face at low values, which failed this
 document's own zero-state requirement. **No public interface changed** — seven IDs,
 36 ordered children, hidden-by-default all hold, so the compositor needs no edit.
+
+Artwork rev 0.2.1 keeps the rev 0.2 geometry and pulls `grad-off` roughly one-quarter back toward rev 0.1 after full-console review showed the zero-state scale carrying slightly too much resting texture. The public interface remains unchanged.
 
 Segments span a **260° sweep** beginning at **140°** (SVG degrees, +x axis, y down),
 which places the gap at the bottom. Segment *i* sits at `140 + 260·(i/35)`.
