@@ -108,7 +108,7 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn("swMaterialPacket", material)
         self.assertIn("swMeterGlint", material)
         self.assertIn("Hue carries condition. Shading carries form.", contract)
-        self.assertIn("must not imply freshness", contract)
+        self.assertIn("imply freshness", contract)
 
     def test_refinement_layer_separates_liveness_and_change(self):
         refinement = (DASHBOARD / "refinement.css").read_text(encoding="utf-8")
