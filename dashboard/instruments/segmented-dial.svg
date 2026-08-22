@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"
      role="img" aria-label="Segmented dial instrument">
-  <!-- ScriptWatch segmented dial instrument v0.1
+  <!-- ScriptWatch segmented dial instrument v0.1 · artwork rev 0.2.1
        Artwork only. No animation, no text, no telemetry logic.
        Public contract: housing, well, face-off, bloom, face-lit, activity, glint
        face-lit and bloom each expose exactly 36 direct children,
@@ -20,9 +20,9 @@
     </linearGradient>
 
     <linearGradient id="grad-off" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0"    stop-color="#1B2B34"/>
-      <stop offset="0.55" stop-color="#263B46"/>
-      <stop offset="1"    stop-color="#33505D"/>
+      <stop offset="0"    stop-color="#17252E"/>
+      <stop offset="0.55" stop-color="#21343F"/>
+      <stop offset="1"    stop-color="#2C4653"/>
     </linearGradient>
 
     <radialGradient id="grad-face" cx="0.37" cy="0.30" r="0.86">
