@@ -35,30 +35,41 @@ class SampleMotionContractTests(unittest.TestCase):
         self.assertIn("heartbeatChanged", js)
         self.assertIn('openFreshnessGate("heartbeat"', js)
 
-    def test_harness_lane_requires_semantic_change(self):
+    def test_harness_carrier_requires_semantic_change(self):
         js = (DASHBOARD / "motion.js").read_text(encoding="utf-8")
         self.assertIn("pulseHarnessChangeCarrier", js)
         self.assertIn("harnessMetricSignature", js)
         self.assertIn('source-node[data-source="heartbeat"]', js)
 
-    def test_individual_metric_motion_is_change_driven(self):
+    def test_travelling_lines_are_suppressed_in_favor_of_local_cues(self):
+        css = (DASHBOARD / "refinement.css").read_text(encoding="utf-8")
+        self.assertIn("Travelling line/slug effects are intentionally suppressed", css)
+        self.assertIn(".source-node:not(:last-child)::before", css)
+        self.assertIn("opacity: 0 !important", css)
+        self.assertIn("swSourceLampPulse", css)
+        self.assertIn(".source-node.sample-pulse.state-live .source-lamp", css)
+        self.assertNotIn("@keyframes swWallPacket", css)
+
+    def test_individual_metric_motion_is_change_driven_and_local(self):
         js = (DASHBOARD / "motion.js").read_text(encoding="utf-8")
         css = (DASHBOARD / "refinement.css").read_text(encoding="utf-8")
         self.assertIn("markMetricChange", js)
         for value_id in ("progress-percent", "cpu-value", "ram-value", "commit-value"):
             self.assertIn(value_id, js)
         self.assertIn(".counter-card.sample-update.state-live::after", css)
+        self.assertIn(".counter-card.sample-update.state-live strong", css)
+        self.assertIn("swMetricValueAck", css)
         self.assertIn(".activity-ring.metric-change.state-live::after", css)
         self.assertIn(".capacity-meter.metric-change.state-live", css)
-        self.assertIn(".counter-card.sample-pulse.state-live::after", css)
         self.assertIn("animation: none !important", css)
 
-    def test_wall_mode_continuous_motion_is_source_only(self):
+    def test_wall_mode_continuous_motion_is_source_only_and_local(self):
         css = (DASHBOARD / "refinement.css").read_text(encoding="utf-8")
         self.assertIn("wall-collector-fresh", css)
         self.assertIn("wall-heartbeat-fresh", css)
-        self.assertIn('source-node[data-source="host"]', css)
-        self.assertIn('source-node[data-source="process"]', css)
+        self.assertIn("swWallSourceAlive", css)
+        self.assertIn('source-node[data-source="host"].state-live .source-lamp', css)
+        self.assertIn('source-node[data-source="process"].state-live .source-lamp', css)
         self.assertNotIn("wall-collector-fresh .counter-card[data-source", css)
         self.assertNotIn("wall-collector-fresh #cpu-gauge", css)
 
