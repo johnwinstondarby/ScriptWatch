@@ -1,12 +1,18 @@
 /*
-ScriptWatch sample-motion bridge v0.2.1
+ScriptWatch sample-motion bridge v0.3.0
 
-Presentation-only bridge between authoritative rendered sample markers and
-visual liveness carriers. It does not poll the backend.
+Presentation-only bridge between authoritative rendered events and visual
+motion. It does not poll the backend and it does not synthesize phase offsets.
 
-Desk view: one rendered sample produces one bounded motion impulse.
-Wall view: motion remains continuous only while a freshness gate is open; the
-gate closes automatically if another sample does not arrive in time.
+Source motion = acquisition liveness.
+Metric motion = value change.
+Color = condition.
+
+The current dashboard exposes one collector sample containing both host and
+InDesign process telemetry, plus an independently observable heartbeat write
+count. Therefore host/process share one collector liveness carrier. Heartbeat
+gets its own carrier. Harness lane motion is reserved for semantic metric
+change rather than mirroring the heartbeat event.
 */
 
 (() => {
@@ -42,6 +48,7 @@ gate closes automatically if another sample does not arrive in time.
   let lastSampleAt = null;
   let lastHeartbeatWrites = null;
   let lastHeartbeatWriteAt = null;
+  let lastHarnessMetricSignature = null;
   let collectorFreshTimer = null;
   let heartbeatFreshTimer = null;
 
@@ -78,6 +85,14 @@ gate closes automatically if another sample does not arrive in time.
     node.classList.remove("sample-pulse");
     void node.offsetWidth;
     node.classList.add("sample-pulse");
+  }
+
+  function markMetricChange(node) {
+    if (!node || !eligible(node)) return;
+    node.classList.remove("metric-change");
+    void node.offsetWidth;
+    node.classList.add("metric-change");
+    window.setTimeout(() => node.classList.remove("metric-change"), 720);
   }
 
   function heartbeatWriteValue() {
@@ -121,24 +136,24 @@ gate closes automatically if another sample does not arrive in time.
     }
   }
 
-  function pulseCollectorSources(durationMs) {
-    ["host", "process"].forEach(source => {
-      pulse(document.querySelector(`.source-node[data-source="${source}"]`), durationMs);
-    });
-
-    document.querySelectorAll('.counter-card[data-source="host"], .counter-card[data-source="process"], .counter-card:not([data-source])')
-      .forEach(node => {
-        if (node.closest("#job-metric-bank")) return;
-        pulse(node, durationMs);
-      });
-
-    document.querySelectorAll(".capacity-meter").forEach(node => pulse(node, durationMs));
+  /* One collector sample carries both host and process data in the current web
+     contract. The Host -> Process lane is therefore the single collector
+     liveness carrier. Do not pulse every counter or both source nodes. */
+  function pulseCollectorCarrier(durationMs) {
+    pulse(document.querySelector('.source-node[data-source="host"]'), durationMs);
   }
 
-  function pulseHeartbeatSources(durationMs) {
+  /* Heartbeat writes are independently observable from collector sampling.
+     The Process -> Heartbeat lane owns heartbeat liveness. */
+  function pulseHeartbeatCarrier(durationMs) {
+    pulse(document.querySelector('.source-node[data-source="process"]'), durationMs);
+  }
+
+  /* Harness transport currently rides the heartbeat. The Heartbeat -> Harness
+     lane therefore moves only when Harness semantic metric values change, not
+     on every heartbeat write. */
+  function pulseHarnessChangeCarrier(durationMs = 620) {
     pulse(document.querySelector('.source-node[data-source="heartbeat"]'), durationMs);
-    pulse(document.querySelector('.source-node[data-source="harness"]'), durationMs);
-    document.querySelectorAll("#job-metric-bank .counter-card").forEach(node => pulse(node, durationMs));
   }
 
   function onFreshRenderedSample() {
@@ -148,7 +163,7 @@ gate closes automatically if another sample does not arrive in time.
     const durationMs = motionDuration(cadenceMs);
 
     syncHeartbeatAnnunciation();
-    pulseCollectorSources(durationMs);
+    pulseCollectorCarrier(durationMs);
     openFreshnessGate("collector", cadenceMs);
 
     const heartbeatWrites = heartbeatWriteValue();
@@ -161,7 +176,7 @@ gate closes automatically if another sample does not arrive in time.
         ? cadenceMs
         : Math.max(1, now - lastHeartbeatWriteAt);
       lastHeartbeatWriteAt = now;
-      pulseHeartbeatSources(motionDuration(heartbeatCadenceMs));
+      pulseHeartbeatCarrier(motionDuration(heartbeatCadenceMs));
       openFreshnessGate("heartbeat", heartbeatCadenceMs);
     }
 
@@ -193,6 +208,60 @@ gate closes automatically if another sample does not arrive in time.
     observer.observe(panel, { attributes: true, attributeFilter: ["class"] });
   }
 
+  function watchTextChange(valueNode, instrumentNode) {
+    if (!valueNode || !instrumentNode) return;
+    let previous = String(valueNode.textContent || "");
+    const observer = new MutationObserver(() => {
+      const current = String(valueNode.textContent || "");
+      if (current === previous) return;
+      const hadPriorValue = previous !== "" && previous !== "--" && previous !== "—";
+      previous = current;
+      if (hadPriorValue) markMetricChange(instrumentNode);
+    });
+    observer.observe(valueNode, { childList: true, characterData: true, subtree: true });
+  }
+
+  function observeMetricChanges() {
+    [
+      ["progress-percent", "progress-gauge"],
+      ["cpu-value", "cpu-gauge"],
+      ["ram-value", "ram-gauge"],
+      ["commit-value", "commit-gauge"],
+    ].forEach(([valueId, instrumentId]) => watchTextChange(byId(valueId), byId(instrumentId)));
+
+    document.querySelectorAll(".capacity-meter").forEach(meter => {
+      watchTextChange(meter.querySelector("strong"), meter);
+    });
+  }
+
+  function harnessMetricSignature() {
+    const bank = byId("job-metric-bank");
+    if (!bank) return "";
+    return Array.from(bank.querySelectorAll(".counter-card strong"))
+      .map(node => String(node.textContent || ""))
+      .join("\u241f");
+  }
+
+  function observeHarnessMetricChanges() {
+    const bank = byId("job-metric-bank");
+    if (!bank) {
+      window.setTimeout(observeHarnessMetricChanges, 100);
+      return;
+    }
+
+    lastHarnessMetricSignature = harnessMetricSignature();
+    const observer = new MutationObserver(() => {
+      const current = harnessMetricSignature();
+      if (current === lastHarnessMetricSignature) return;
+      const hadPrior = lastHarnessMetricSignature !== null && lastHarnessMetricSignature !== "";
+      lastHarnessMetricSignature = current;
+      if (hadPrior) pulseHarnessChangeCarrier();
+    });
+    observer.observe(bank, { childList: true, characterData: true, subtree: true });
+  }
+
   observeFreshSamples();
   observeHeartbeatMode();
+  observeMetricChanges();
+  observeHarnessMetricChanges();
 })();
