@@ -1,9 +1,13 @@
 /*
-ScriptWatch authored-instrument diagnostics v0.1.0
+ScriptWatch authored-instrument diagnostics v0.2.0
 
 Independent observation layer for compositor acceptance. It does not drive
 telemetry, artwork state, or motion. It records what the rendered dashboard did
 so value-change glints can be verified without relying on video timing.
+
+v0.2 adds timestamped value-change and glint-start event logs plus a lockstep
+diagnostic. Lockstep is evidence to inspect event ownership, not proof by itself
+that two metrics share a trigger.
 */
 
 (() => {
@@ -20,6 +24,10 @@ so value-change glints can be verified without relying on video timing.
     lastSampleMarker: "",
     metrics: {}
   };
+
+  function elapsedMs() {
+    return Math.round(performance.now() - stats.startedAt);
+  }
 
   function displayValue(text) {
     const value = String(text || "").trim();
@@ -82,6 +90,8 @@ so value-change glints can be verified without relying on video timing.
       valueChanges: 0,
       eligibleValueChanges: 0,
       glintStarts: 0,
+      valueEvents: [],
+      glintEvents: [],
       lastValue: displayValue(valueNode.textContent),
       lastGlintOpacity: Number(glint.getAttribute("opacity") || 0) || 0
     };
@@ -90,20 +100,118 @@ so value-change glints can be verified without relying on video timing.
     const valueObserver = new MutationObserver(() => {
       const current = displayValue(valueNode.textContent);
       if (current === metric.lastValue) return;
-      const hadPrior = metric.lastValue !== null;
+      const previous = metric.lastValue;
+      const hadPrior = previous !== null;
       metric.lastValue = current;
       if (!hadPrior || current === null) return;
       metric.valueChanges += 1;
-      if (eligibleForGlint(gauge)) metric.eligibleValueChanges += 1;
+      const eligible = eligibleForGlint(gauge);
+      if (eligible) metric.eligibleValueChanges += 1;
+      metric.valueEvents.push({
+        tMs: elapsedMs(),
+        sampleEvent: stats.sampleEvents,
+        previous,
+        value: current,
+        state: stateOf(gauge),
+        eligible
+      });
     });
     valueObserver.observe(valueNode, { childList: true, characterData: true, subtree: true });
 
     const glintObserver = new MutationObserver(() => {
       const opacity = Number(glint.getAttribute("opacity") || 0) || 0;
-      if (metric.lastGlintOpacity <= 0.001 && opacity > 0.001) metric.glintStarts += 1;
+      if (metric.lastGlintOpacity <= 0.001 && opacity > 0.001) {
+        metric.glintStarts += 1;
+        metric.glintEvents.push({
+          tMs: elapsedMs(),
+          sampleEvent: stats.sampleEvents,
+          value: displayValue(valueNode.textContent),
+          state: stateOf(gauge)
+        });
+      }
       metric.lastGlintOpacity = opacity;
     });
     glintObserver.observe(glint, { attributes: true, attributeFilter: ["opacity"] });
+  }
+
+  function pairGlintEvents(left, right, toleranceMs) {
+    const remaining = right.map((event, index) => ({ event, index }));
+    const pairs = [];
+    for (const event of left) {
+      if (!remaining.length) break;
+      let bestAt = -1;
+      let bestDelta = Infinity;
+      for (let index = 0; index < remaining.length; index += 1) {
+        const delta = Math.abs(event.tMs - remaining[index].event.tMs);
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestAt = index;
+        }
+      }
+      if (bestAt >= 0 && bestDelta <= toleranceMs) {
+        const match = remaining.splice(bestAt, 1)[0].event;
+        pairs.push({
+          leftMs: event.tMs,
+          rightMs: match.tMs,
+          deltaMs: bestDelta,
+          leftSample: event.sampleEvent,
+          rightSample: match.sampleEvent
+        });
+      }
+    }
+    return pairs;
+  }
+
+  function lockstep(toleranceMs = 25) {
+    const left = stats.metrics.cpu?.glintEvents || [];
+    const right = stats.metrics.ram?.glintEvents || [];
+    const pairs = pairGlintEvents(left, right, Math.max(0, Number(toleranceMs) || 25));
+    const denominator = Math.min(left.length, right.length);
+    const ratio = denominator ? pairs.length / denominator : 0;
+    return {
+      toleranceMs: Math.max(0, Number(toleranceMs) || 25),
+      cpuGlints: left.length,
+      ramGlints: right.length,
+      pairedGlints: pairs.length,
+      pairedRatio: Number(ratio.toFixed(3)),
+      suspectedLockstep: denominator >= 2 && ratio >= 0.8,
+      note: "Lockstep is a diagnostic trigger. Confirm underlying event identity before declaring a shared trigger.",
+      pairs
+    };
+  }
+
+  function eventTimeline() {
+    const rows = [];
+    for (const config of METRICS) {
+      const metric = stats.metrics[config.key];
+      if (!metric) continue;
+      for (const event of metric.valueEvents || []) {
+        rows.push({
+          tMs: event.tMs,
+          metric: config.key,
+          event: "value-change",
+          sampleEvent: event.sampleEvent,
+          value: event.value,
+          previous: event.previous,
+          state: event.state,
+          eligible: event.eligible
+        });
+      }
+      for (const event of metric.glintEvents || []) {
+        rows.push({
+          tMs: event.tMs,
+          metric: config.key,
+          event: "glint-start",
+          sampleEvent: event.sampleEvent,
+          value: event.value,
+          previous: "",
+          state: event.state,
+          eligible: ""
+        });
+      }
+    }
+    rows.sort((a, b) => a.tMs - b.tMs || a.metric.localeCompare(b.metric));
+    return rows;
   }
 
   function snapshot() {
@@ -124,13 +232,16 @@ so value-change glints can be verified without relying on video timing.
         glintStarts: metric.glintStarts || 0,
         glintMatchesEligibleChanges: (metric.glintStarts || 0) === (metric.eligibleValueChanges || 0),
         activityVisible: activity,
-        sharedSourceActivityCorrect: activity === false
+        sharedSourceActivityCorrect: activity === false,
+        valueChangeTimesMs: (metric.valueEvents || []).map(event => event.tMs),
+        glintStartTimesMs: (metric.glintEvents || []).map(event => event.tMs)
       };
     }
     return {
       elapsedSeconds: Number(((performance.now() - stats.startedAt) / 1000).toFixed(1)),
       sampleEvents: stats.sampleEvents,
-      metrics
+      metrics,
+      lockstep: lockstep()
     };
   }
 
@@ -141,6 +252,9 @@ so value-change glints can be verified without relying on video timing.
       sampleEvents: snap.sampleEvents
     });
     console.table(snap.metrics);
+    const timeline = eventTimeline();
+    if (timeline.length) console.table(timeline);
+    console.log("Glint lockstep diagnostic", snap.lockstep);
     return snap;
   }
 
@@ -155,6 +269,8 @@ so value-change glints can be verified without relying on video timing.
       metric.valueChanges = 0;
       metric.eligibleValueChanges = 0;
       metric.glintStarts = 0;
+      metric.valueEvents = [];
+      metric.glintEvents = [];
       metric.lastValue = displayValue(document.getElementById(config.valueId)?.textContent);
       const glint = document.getElementById(config.gaugeId)?.querySelector('[data-sw-role="glint"]');
       metric.lastGlintOpacity = Number(glint?.getAttribute("opacity") || 0) || 0;
@@ -192,7 +308,14 @@ so value-change glints can be verified without relying on video timing.
     });
   }
 
-  window.ScriptWatchInstrumentDiagnostics = { snapshot, print, reset, frameProbe };
+  window.ScriptWatchInstrumentDiagnostics = {
+    snapshot,
+    print,
+    reset,
+    events: eventTimeline,
+    lockstep,
+    frameProbe
+  };
   installSampleObserver();
   METRICS.forEach(installMetricObserver);
 })();
