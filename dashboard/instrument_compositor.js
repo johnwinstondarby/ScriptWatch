@@ -1,13 +1,14 @@
 /*
-ScriptWatch instrument compositor v0.1.1
+ScriptWatch instrument compositor v0.2.0
 
 Loads authored SVG instrument artwork into the live dashboard without changing
-collector or Harness semantics. v0.1 mounts the segmented-dial asset on CPU only.
+collector or Harness semantics. v0.2 mounts the segmented-dial asset on CPU and
+RAM; Commit remains on the legacy CSS dial for side-by-side acceptance.
 
-Source motion remains owned by source-level telemetry. CPU's embedded activity
-carrier is intentionally disabled because CPU, RAM, and Commit currently share
-one Monitor.tick() acquisition event. The local glint acknowledges CPU value
-change only.
+Source motion remains owned by source-level telemetry. CPU and RAM embedded
+activity carriers are intentionally disabled because CPU, RAM, and Commit
+currently share one Monitor.tick() acquisition event. Each local glint
+acknowledges only that metric's value change.
 */
 
 (() => {
@@ -38,6 +39,12 @@ change only.
       gaugeId: "cpu-gauge",
       valueId: "cpu-value",
       prefix: "cpu",
+      allowActivity: false
+    },
+    {
+      gaugeId: "ram-gauge",
+      valueId: "ram-value",
+      prefix: "ram",
       allowActivity: false
     }
   ];
@@ -241,8 +248,9 @@ change only.
       instance.lastLitCount = count;
     }
 
-    // CPU shares the collector acquisition with RAM and Commit, so its local
-    // activity carrier would duplicate one source event three times. Keep it off.
+    // CPU, RAM, and Commit share one collector acquisition event, so local
+    // activity carriers would duplicate source liveness. Keep them off unless
+    // a future instrument owns an independently observable acquisition event.
     setActivityEnabled(instance, Boolean(instance.config.allowActivity));
 
     const changed = !initializing && value !== null && instance.lastValue !== null && value !== instance.lastValue;
