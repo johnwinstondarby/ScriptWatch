@@ -51,6 +51,8 @@ Motion is evidence, not decoration.
 
 A moving object must correspond to an observable event or a freshness gate derived from observable events. Artificial staggering, random jitter, phase offsets, and decorative free-running animation are prohibited when they create the appearance of independent telemetry.
 
+Motion should remain spatially local when a local cue carries the same information. Long travelling lines, slugs, and repeated sweeps consume attention across the console and are avoided unless the path itself is the information being measured.
+
 ### 2.1 Indicator independence rule
 
 An independent liveness carrier is justified only when the data contract exposes an independently observable event identity, timestamp, sequence, write count, or equivalent freshness surface for that source.
@@ -103,11 +105,11 @@ Timestamped diagnostics remain part of acceptance. Coincident glints across mult
 
 ### 2.4 Desk and wall modes
 
-Desk view uses discrete source impulses. One authoritative source event produces one bounded source motion event. This exposes acquisition cadence directly.
+Desk view uses discrete source impulses. One authoritative source event produces one bounded, local source-lamp acknowledgement. This exposes acquisition cadence directly without sending a bright object across the console.
 
-Wall view uses freshness-gated continuous **source** motion. A fresh source event opens or renews a liveness gate. While the gate is open, the source carrier moves continuously at a speed derived from observed cadence. If fresh events stop, the gate expires and source motion stops automatically.
+Wall view uses freshness-gated continuous **source** motion. A fresh source event opens or renews a liveness gate. While the gate is open, the owning source lamp uses a slow local heartbeat whose cadence derives from observed sampling. If fresh events stop, the gate expires and source motion stops automatically.
 
-Individual metric carriers remain change-driven in both views. Wall mode must not convert an entire counter bank into continuously moving decoration.
+Individual metric carriers remain change-driven in both views. Counter changes use local value acknowledgement rather than horizontal travelling runners. Wall mode must not convert an entire counter bank into continuously moving decoration.
 
 ### 2.5 NOC-distance observability gate
 
@@ -132,15 +134,15 @@ The console exposes the acquisition architecture as a source bus:
 3. heartbeat telemetry;
 4. ScriptWatch Harness telemetry.
 
-Source nodes carry state and provenance. Travelling lane packets carry independently supported acquisition or semantic-change events.
+Source nodes carry state, provenance, and local liveness cues. The connecting lanes remain static topology/state indicators rather than travelling animation paths.
 
 In the current implementation:
 
-- Host → Process represents the shared collector sample containing host and process telemetry;
-- Process → Heartbeat represents heartbeat-write liveness;
-- Heartbeat → Harness moves only for a real Harness semantic metric change, not as a duplicate heartbeat carrier.
+- Host owns the shared collector-liveness cue for the Host + Process `Monitor.tick()` acquisition;
+- Process owns the independent heartbeat-write cue;
+- Heartbeat receives a discrete local cue only for a real Harness semantic metric change, not as a duplicate heartbeat animation.
 
-A source-bus segment may carry motion only when the destination it feeds is live or at limit. A healthy upstream source must not visually deliver into a dormant, faulted, never-sampled, or unsupported downstream source.
+A source-bus lane takes the state of the destination it feeds. A healthy upstream source must not visually imply delivery into a dormant, faulted, never-sampled, or unsupported downstream source.
 
 Harness participation is also exposed as a top-level operator indicator:
 
@@ -164,7 +166,7 @@ Capability OFF states follow the same rule. A neutral Harness OFF indicator can 
 The reusable instrument vocabulary is:
 
 - `SegmentedDial(state, value)` for bounded ratios such as CPU, RAM, commit, and job progress;
-- `FlowLane(state, event)` for acquisition and semantic-flow activity;
+- source lanes and source lamps for acquisition topology and liveness;
 - `Counter(state, value)` for totals and point-in-time numeric values;
 - `Meter(state, value)` for bounded headroom/capacity values;
 - sparkline/history panels for retained time-series context;
@@ -188,9 +190,11 @@ Source identity and source state are separate dimensions. A process counter rema
 
 ### 4.2 Counter indicator rule
 
-A per-counter lamp, runner, or highlight must encode a real counter-level property such as operator-visible value change. Decorative marks that merely repeat the source bay's liveness are prohibited.
+A per-counter lamp or highlight must encode a real counter-level property such as operator-visible value change. Decorative marks that merely repeat the source bay's liveness are prohibited.
 
 A counter can remain visually still while its source remains live. That means the displayed value has not changed, not that the source stopped sampling. Source liveness is asserted once at the acquisition level.
+
+The production console uses a brief local value glow for counter changes. Horizontal travelling runners are intentionally suppressed because they pull the eye across the bank without adding information beyond the value-change event itself.
 
 ## 5. Color roles
 
@@ -231,6 +235,8 @@ When more than one inline SVG instance is mounted in one document, every SVG `id
 
 Authored activity artwork does not automatically earn motion. Its use remains subject to the indicator-independence rule. In the current CPU/RAM/Commit set, the three dials share one collector event, so their embedded `activity` layers remain disabled as liveness carriers. Local `glint` artwork may acknowledge a real operator-visible metric value change.
 
+An authored dial's condition hue must match its runtime state. Both the illuminated magnitude segments and the darker unlit scale inherit the same state family: green for `LIVE`, amber for `DORMANT`, orange for `AT_LIMIT`, red for `FAULT`, and neutral gray for `NEVER_SAMPLED` or unsupported capability. Shading may vary inside that hue family to preserve dimensional form.
+
 The current runtime acceptance integration mounts authored SVG dials on CPU and RAM while Commit remains the legacy CSS control. The legacy CSS dial remains the fail-safe until each SVG parses, validates against the contract, is namespaced, and initializes successfully. If compositor setup fails, ScriptWatch leaves the legacy dial in place.
 
 ## 6. Instrument workbench and specimen-strip gate
@@ -255,7 +261,9 @@ The specimen-strip gate checks at least these distinctions:
 14. no two nominally independent carriers are manufactured from one event by phase offset, stagger, or jitter;
 15. when two carriers remain in lockstep over a long observation, their event identity is reviewed and merged if it is shared;
 16. authored SVG instances preserve their public layer contract after namespacing;
-17. compositor failure falls back to the legacy instrument without inventing a healthy state.
+17. compositor failure falls back to the legacy instrument without inventing a healthy state;
+18. primary instrument hue follows runtime state across both lit and unlit artwork;
+19. travelling line effects are omitted when a local liveness or value-change cue carries the same information more quietly.
 
 The workbench also carries a fake Host → Process → Heartbeat → Harness rig so flow behavior can be reviewed without changing production telemetry code.
 
@@ -279,7 +287,9 @@ A tiled-console specimen may present multiple compact ScriptWatch instances simu
 - Raw numeric changes below display precision do not earn metric-change motion.
 - Initialization and source/data recovery do not earn metric-change motion.
 - Artificial staggering, jitter, or phase offset must never simulate independent telemetry.
+- Long travelling motion must not be used when a local cue conveys the same telemetry fact with less visual competition.
 - Color must encode state consistently enough to remain meaningful at reduced scale.
+- The hue of an authored primary instrument must agree with its runtime state, including its unlit/resting scale.
 - Dimensional styling must not imply liveness or condition independently of the state machine.
 - Authored artwork must not introduce autonomous animation or hidden telemetry semantics.
 - Repeated diagnostic copies of one condition must not inflate the apparent alarm count.
