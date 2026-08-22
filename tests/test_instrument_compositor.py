@@ -8,11 +8,13 @@ ASSET = DASHBOARD / "instruments" / "segmented-dial.svg"
 
 
 class InstrumentCompositorTests(unittest.TestCase):
-    def test_index_loads_compositor_after_runtime_layers(self):
+    def test_index_loads_compositor_and_diagnostics_after_runtime_layers(self):
         html = (DASHBOARD / "index.html").read_text(encoding="utf-8")
         self.assertIn('href="instrument_compositor.css"', html)
         self.assertIn('src="instrument_compositor.js"', html)
+        self.assertIn('src="instrument_diagnostics.js"', html)
         self.assertLess(html.index('src="motion.js"'), html.index('src="instrument_compositor.js"'))
+        self.assertLess(html.index('src="instrument_compositor.js"'), html.index('src="instrument_diagnostics.js"'))
 
     def test_svg_contract_is_present(self):
         root = ET.parse(ASSET).getroot()
@@ -33,6 +35,15 @@ class InstrumentCompositorTests(unittest.TestCase):
         by_id = {node.attrib.get("id"): node for node in root.iter() if node.attrib.get("id")}
         self.assertTrue(all(child.attrib.get("visibility") == "hidden" for child in by_id["face-lit"]))
         self.assertTrue(all(child.attrib.get("visibility") == "hidden" for child in by_id["bloom"]))
+
+    def test_artwork_rev021_resting_ring_is_tuned(self):
+        root = ET.parse(ASSET).getroot()
+        by_id = {node.attrib.get("id"): node for node in root.iter() if node.attrib.get("id")}
+        stops = [stop.attrib.get("stop-color") for stop in list(by_id["grad-off"])]
+        self.assertEqual(stops, ["#17252E", "#21343F", "#2C4653"])
+        contract = (ROOT / "docs" / "SEGMENTED_DIAL_SVG_CONTRACT_v0_1.md").read_text(encoding="utf-8")
+        self.assertIn("artwork rev 0.2.1", contract)
+        self.assertIn("resting texture", contract)
 
     def test_compositor_namespaces_internal_svg_ids(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
@@ -60,6 +71,17 @@ class InstrumentCompositorTests(unittest.TestCase):
         self.assertIn("const changed = !initializing", js)
         self.assertIn("fireGlint(instance)", js)
         self.assertIn("setSegments(instance, count)", js)
+
+    def test_diagnostics_observe_glint_and_activity_independently(self):
+        js = (DASHBOARD / "instrument_diagnostics.js").read_text(encoding="utf-8")
+        self.assertNotIn("fetch(", js)
+        self.assertIn("eligibleValueChanges", js)
+        self.assertIn("glintStarts", js)
+        self.assertIn("glintMatchesEligibleChanges", js)
+        self.assertIn("sharedSourceActivityCorrect", js)
+        self.assertIn("window.ScriptWatchInstrumentDiagnostics", js)
+        self.assertIn("frameProbe", js)
+        self.assertIn("use browser Performance tools for paint/composite cost", js)
 
     def test_failure_preserves_legacy_dial(self):
         js = (DASHBOARD / "instrument_compositor.js").read_text(encoding="utf-8")
