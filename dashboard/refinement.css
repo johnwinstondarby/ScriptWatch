@@ -1,16 +1,14 @@
 /*
-ScriptWatch behavior/layout refinement layer v0.1.1
+ScriptWatch behavior/layout refinement layer v0.2.0
 
-Loaded after material.css. This layer separates desk and wall liveness behavior,
-binds source-path motion to the destination source, and removes empty bordered
-chassis below active instruments.
+Loaded after material.css.
+
+Source motion = acquisition liveness.
+Metric motion = value change.
+Color = condition.
+
+No phase offsets or stagger are used to manufacture apparent independence.
 */
-
-@property --sw-wall-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
 
 :root {
   --sw-wall-cycle: 5200ms;
@@ -18,9 +16,9 @@ chassis below active instruments.
 }
 
 /* ------------------------------------------------------------
-   Source path semantics: a lane is healthy only if the source it
-   feeds is healthy. A live Process source cannot visually deliver
-   a packet into a dormant Heartbeat node.
+   Source path semantics. A lane takes the state of the source it
+   feeds. A live upstream source cannot visually deliver into a
+   dormant or unsupported destination.
    ------------------------------------------------------------ */
 .source-node:not(:last-child) {
   --sw-lane-color: #243239;
@@ -77,125 +75,104 @@ chassis below active instruments.
     0 1px 2px rgba(0,0,0,.72) !important;
 }
 
-/* The earlier sample-pulse selector keys from the source node. This later
-   gate requires the destination to be live as well. */
 .source-node.sample-pulse:not(:has(+ .source-node.state-live)):not(:has(+ .source-node.state-limit))::before {
   animation: none !important;
   opacity: 0 !important;
 }
 
-/* ------------------------------------------------------------
-   Desk mode: discrete sample impulses remain discrete.
-   A zero-valued dial still acknowledges each sample at its housing.
-   ------------------------------------------------------------ */
-@keyframes swDialSampleAck {
-  0% {
-    box-shadow:
-      inset 0 0 0 1px rgba(255,255,255,.035),
-      inset 0 0 18px rgba(0,0,0,.72),
-      0 5px 13px rgba(0,0,0,.55),
-      0 0 7px color-mix(in srgb, var(--state-color) 10%, transparent);
-  }
-  32% {
-    box-shadow:
-      inset 0 0 0 1px rgba(255,255,255,.065),
-      inset 0 0 18px rgba(0,0,0,.60),
-      0 5px 13px rgba(0,0,0,.55),
-      0 0 24px color-mix(in srgb, var(--state-color) 42%, transparent);
-  }
-  100% {
-    box-shadow:
-      inset 0 0 0 1px rgba(255,255,255,.035),
-      inset 0 0 18px rgba(0,0,0,.72),
-      0 5px 13px rgba(0,0,0,.55),
-      0 0 18px color-mix(in srgb, var(--state-color) 14%, transparent);
-  }
-}
-body:not(.view-wall) .activity-ring.sample-hit.state-live,
-body:not(.view-wall) .activity-ring.sample-hit.state-limit {
-  animation: swDialSampleAck 620ms ease-out 1 !important;
+/* A source event gets one moving carrier. The lamp remains a condition lamp,
+   not a second liveness animation. */
+.source-node.sample-pulse .source-lamp {
+  animation: none !important;
 }
 
 /* ------------------------------------------------------------
-   Wall behavior preview. Add ?view=wall to the normal dashboard URL.
-
-   Wall motion is freshness-gated continuous motion. Speed follows observed
-   cadence; the gate disappears automatically if another sample does not arrive
-   within the freshness window. This is intentionally different from desk mode.
+   Individual values indicate CHANGE, not source liveness.
+   The old sample-pulse carriers are explicitly suppressed.
    ------------------------------------------------------------ */
-@keyframes swWallCounter {
-  0% { transform: translateX(-145%); opacity: .22; }
-  18% { opacity: .82; }
-  82% { opacity: .76; }
-  100% { transform: translateX(355%); opacity: .22; }
+.counter-card.sample-pulse.state-live::after,
+.counter-card.sample-pulse.state-limit::after,
+.capacity-meter.sample-pulse.state-live .capacity-fill::after,
+.capacity-meter.sample-pulse.state-limit .capacity-fill::after {
+  animation: none !important;
+  opacity: 0 !important;
 }
+
+/* app.js already applies sample-update only when a counter's displayed value
+   changed. Use that existing truth surface for the counter slug. */
+.counter-card.sample-update.state-live::after,
+.counter-card.sample-update.state-limit::after {
+  animation: swCounterRunner .44s linear 1 !important;
+  opacity: .90 !important;
+}
+
+/* Dial tracer is quiet at rest. A metric-change class is generated only when
+   that dial's displayed value changes. */
+.activity-ring.state-live::after,
+.activity-ring.state-limit::after {
+  animation: none !important;
+  transform: rotate(0deg) !important;
+  transition: opacity .2s ease !important;
+}
+
+@keyframes swMetricDialChange {
+  0% { transform: rotate(-82deg); opacity: .24; }
+  18% { opacity: .98; }
+  100% { transform: rotate(0deg); opacity: .78; }
+}
+.activity-ring.metric-change.state-live::after,
+.activity-ring.metric-change.state-limit::after {
+  animation: swMetricDialChange .62s cubic-bezier(.2,.72,.25,1) 1 !important;
+}
+
+/* Metric-change is also used by the two capacity meters. */
+.capacity-meter.metric-change.state-live .capacity-fill::after,
+.capacity-meter.metric-change.state-limit .capacity-fill::after {
+  animation: swMeterGlint .62s linear 1 !important;
+  opacity: .62 !important;
+}
+
+/* The legacy app-level sample-hit class fires for every dial from one sample.
+   It must not create synchronized visual activity. */
+.activity-ring.sample-hit {
+  animation: none !important;
+}
+
+/* ------------------------------------------------------------
+   Wall view. Add ?view=wall or ?view=noc.
+
+   Wall liveness is continuous only at the independently observable source
+   level. Individual metric carriers remain change-driven in both views.
+   ------------------------------------------------------------ */
 @keyframes swWallPacket {
   0% { transform: translateX(-58px); opacity: .20; }
   16% { opacity: .92; }
   84% { opacity: .78; }
   100% { transform: translateX(15px); opacity: .20; }
 }
-@keyframes swWallMeter {
-  0% { transform: translateY(0); opacity: .16; }
-  20% { opacity: .62; }
-  78% { opacity: .50; }
-  100% { transform: translateY(-86px); opacity: .16; }
-}
-@keyframes swWallOrbit {
-  from { --sw-wall-angle: 0deg; }
-  to { --sw-wall-angle: 360deg; }
-}
 
-/* Collector-fed counters and meters stay in slow motion while collector
-   freshness remains valid. */
-body.view-wall.wall-collector-fresh .counter-card[data-source="host"].state-live::after,
-body.view-wall.wall-collector-fresh .counter-card[data-source="host"].state-limit::after,
-body.view-wall.wall-collector-fresh .counter-card[data-source="process"].state-live::after,
-body.view-wall.wall-collector-fresh .counter-card[data-source="process"].state-limit::after {
-  animation: swWallCounter var(--sw-wall-cycle) linear infinite !important;
-  opacity: .82 !important;
-}
-body.view-wall.wall-collector-fresh .capacity-meter.state-live .capacity-fill::after,
-body.view-wall.wall-collector-fresh .capacity-meter.state-limit .capacity-fill::after {
-  animation: swWallMeter var(--sw-wall-cycle) linear infinite !important;
-  opacity: .58 !important;
-}
-
-/* Host -> Process uses collector freshness. Process -> Heartbeat and
-   Heartbeat -> Harness require heartbeat freshness and a live destination. */
+/* Current web contract: Host + Process arrive in one Monitor.tick payload.
+   The Host -> Process lane is therefore the one collector liveness carrier. */
 body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-live:has(+ .source-node.state-live)::before,
 body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-limit:has(+ .source-node.state-live)::before {
   animation: swWallPacket var(--sw-wall-cycle) linear infinite !important;
   opacity: .9 !important;
 }
+
+/* Heartbeat writes are independently observable. Process -> Heartbeat owns
+   heartbeat liveness. */
 body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-live:has(+ .source-node.state-live)::before,
-body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-limit:has(+ .source-node.state-live)::before,
-body.view-wall.wall-heartbeat-fresh .source-node[data-source="heartbeat"].state-live:has(+ .source-node.state-live)::before,
-body.view-wall.wall-heartbeat-fresh .source-node[data-source="heartbeat"].state-limit:has(+ .source-node.state-live)::before {
+body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-limit:has(+ .source-node.state-live)::before {
   animation: swWallPacket var(--sw-wall-heartbeat-cycle) linear infinite !important;
   opacity: .9 !important;
 }
 
-/* Zero-valued CPU and other bounded collector dials remain visibly alive in
-   wall mode because the tracer does not depend on ring fill magnitude. The job
-   progress ring is deliberately excluded until its heartbeat-specific motion
-   contract is exercised with a real Harness job. */
-body.view-wall.wall-collector-fresh #cpu-gauge.state-live::after,
-body.view-wall.wall-collector-fresh #cpu-gauge.state-limit::after,
-body.view-wall.wall-collector-fresh #ram-gauge.state-live::after,
-body.view-wall.wall-collector-fresh #ram-gauge.state-limit::after,
-body.view-wall.wall-collector-fresh #commit-gauge.state-live::after,
-body.view-wall.wall-collector-fresh #commit-gauge.state-limit::after {
-  transform: rotate(calc(var(--activity-angle) * 1deg + var(--sw-wall-angle))) !important;
-  animation: swWallOrbit var(--sw-wall-cycle) linear infinite !important;
-  opacity: .96 !important;
-  transition: none !important;
-}
-
-body.view-wall.wall-heartbeat-fresh #job-metric-bank .counter-card.state-live::after,
-body.view-wall.wall-heartbeat-fresh #job-metric-bank .counter-card.state-limit::after {
-  animation: swWallCounter var(--sw-wall-heartbeat-cycle) linear infinite !important;
-  opacity: .82 !important;
+/* Heartbeat -> Harness is not a duplicate heartbeat carrier. It moves only on
+   a real Harness metric change via the discrete sample-pulse class. */
+body.view-wall .source-node[data-source="heartbeat"].sample-pulse.state-live:has(+ .source-node.state-live)::before,
+body.view-wall .source-node[data-source="heartbeat"].sample-pulse.state-limit:has(+ .source-node.state-live)::before {
+  animation: swMaterialPacket var(--sw-sample-duration) linear 1 !important;
+  opacity: .9 !important;
 }
 
 /* ------------------------------------------------------------
@@ -226,14 +203,12 @@ body.view-wall.wall-heartbeat-fresh #job-metric-bank .counter-card.state-limit::
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body.view-wall.wall-collector-fresh .counter-card::after,
-  body.view-wall.wall-collector-fresh .capacity-fill::after,
+  .source-node.sample-pulse::before,
+  .counter-card.sample-update::after,
+  .activity-ring.metric-change::after,
+  .capacity-meter.metric-change .capacity-fill::after,
   body.view-wall.wall-collector-fresh .source-node::before,
-  body.view-wall.wall-heartbeat-fresh .counter-card::after,
-  body.view-wall.wall-heartbeat-fresh .source-node::before,
-  body.view-wall.wall-collector-fresh #cpu-gauge::after,
-  body.view-wall.wall-collector-fresh #ram-gauge::after,
-  body.view-wall.wall-collector-fresh #commit-gauge::after {
+  body.view-wall.wall-heartbeat-fresh .source-node::before {
     animation: none !important;
   }
 }
