@@ -1,5 +1,5 @@
 /*
-ScriptWatch behavior/layout refinement layer v0.2.0
+ScriptWatch behavior/layout refinement layer v0.3.0
 
 Loaded after material.css.
 
@@ -8,6 +8,8 @@ Metric motion = value change.
 Color = condition.
 
 No phase offsets or stagger are used to manufacture apparent independence.
+Travelling line/slug effects are intentionally suppressed. Motion stays local to
+its source or value so the console remains readable at NOC distance.
 */
 
 :root {
@@ -22,6 +24,10 @@ No phase offsets or stagger are used to manufacture apparent independence.
    ------------------------------------------------------------ */
 .source-node:not(:last-child) {
   --sw-lane-color: #243239;
+  --sw-pulse-color: var(--sw-console-green);
+}
+.source-node.state-limit {
+  --sw-pulse-color: var(--sw-console-limit);
 }
 .source-node:has(+ .source-node.state-live) {
   --sw-lane-color: var(--sw-console-green);
@@ -40,6 +46,7 @@ No phase offsets or stagger are used to manufacture apparent independence.
   --sw-lane-color: #26333a;
 }
 
+/* The lane remains as topology/state, but it does not carry a travelling packet. */
 .source-node:not(:last-child)::after {
   opacity: .24 !important;
   background:
@@ -61,49 +68,56 @@ No phase offsets or stagger are used to manufacture apparent independence.
   opacity: .18 !important;
 }
 
-.source-node:not(:last-child)::before {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.82) 0 15%, rgba(255,255,255,.18) 28%, transparent 44%),
-    linear-gradient(90deg,
-      color-mix(in srgb, var(--sw-lane-color) 45%, #03100a),
-      var(--sw-lane-color) 48%,
-      color-mix(in srgb, var(--sw-lane-color) 50%, #fff) 55%,
-      var(--sw-lane-color) 72%,
-      color-mix(in srgb, var(--sw-lane-color) 50%, #020506)) !important;
-  box-shadow:
-    0 0 8px color-mix(in srgb, var(--sw-lane-color) 55%, transparent),
-    0 1px 2px rgba(0,0,0,.72) !important;
-}
-
-.source-node.sample-pulse:not(:has(+ .source-node.state-live)):not(:has(+ .source-node.state-limit))::before {
+/* Suppress the old travelling capsule/line carrier in every view. */
+.source-node:not(:last-child)::before,
+.source-node.sample-pulse::before,
+body.view-wall.wall-collector-fresh .source-node::before,
+body.view-wall.wall-heartbeat-fresh .source-node::before {
   animation: none !important;
   opacity: 0 !important;
 }
 
-/* A source event gets one moving carrier. The lamp remains a condition lamp,
-   not a second liveness animation. */
-.source-node.sample-pulse .source-lamp {
-  animation: none !important;
+/* Source liveness is now a compact local pulse at the source lamp. */
+@keyframes swSourceLampPulse {
+  0%   { transform: scale(1);    filter: brightness(1);    box-shadow: 0 0 3px color-mix(in srgb, var(--sw-pulse-color) 35%, transparent); }
+  32%  { transform: scale(1.48); filter: brightness(1.55); box-shadow: 0 0 12px color-mix(in srgb, var(--sw-pulse-color) 72%, transparent); }
+  100% { transform: scale(1);    filter: brightness(1);    box-shadow: 0 0 3px color-mix(in srgb, var(--sw-pulse-color) 35%, transparent); }
+}
+.source-node.sample-pulse.state-live .source-lamp,
+.source-node.sample-pulse.state-limit .source-lamp {
+  animation: swSourceLampPulse .54s cubic-bezier(.18,.76,.28,1) 1 !important;
 }
 
 /* ------------------------------------------------------------
    Individual values indicate CHANGE, not source liveness.
-   The old sample-pulse carriers are explicitly suppressed.
+   Horizontal runner lines are suppressed; changed values acknowledge
+   locally through a brief text glow.
    ------------------------------------------------------------ */
 .counter-card.sample-pulse.state-live::after,
 .counter-card.sample-pulse.state-limit::after,
+.counter-card.sample-update.state-live::after,
+.counter-card.sample-update.state-limit::after,
 .capacity-meter.sample-pulse.state-live .capacity-fill::after,
-.capacity-meter.sample-pulse.state-limit .capacity-fill::after {
+.capacity-meter.sample-pulse.state-limit .capacity-fill::after,
+.capacity-meter.metric-change.state-live .capacity-fill::after,
+.capacity-meter.metric-change.state-limit .capacity-fill::after {
   animation: none !important;
   opacity: 0 !important;
 }
 
-/* app.js already applies sample-update only when a counter's displayed value
-   changed. Use that existing truth surface for the counter slug. */
-.counter-card.sample-update.state-live::after,
-.counter-card.sample-update.state-limit::after {
-  animation: swCounterRunner .44s linear 1 !important;
-  opacity: .90 !important;
+@keyframes swMetricValueAck {
+  0%   { filter: brightness(1);    text-shadow: 0 0 0 rgba(92,239,176,0); }
+  28%  { filter: brightness(1.28); text-shadow: 0 0 9px rgba(92,239,176,.58); }
+  100% { filter: brightness(1);    text-shadow: 0 0 0 rgba(92,239,176,0); }
+}
+.counter-card.sample-update.state-live strong,
+.capacity-meter.metric-change.state-live strong {
+  animation: swMetricValueAck .46s ease-out 1 !important;
+}
+.counter-card.sample-update.state-limit strong,
+.capacity-meter.metric-change.state-limit strong {
+  animation: swMetricValueAck .46s ease-out 1 !important;
+  --sw-change-color: var(--sw-console-limit);
 }
 
 /* Dial tracer is quiet at rest. A metric-change class is generated only when
@@ -125,13 +139,6 @@ No phase offsets or stagger are used to manufacture apparent independence.
   animation: swMetricDialChange .62s cubic-bezier(.2,.72,.25,1) 1 !important;
 }
 
-/* Metric-change is also used by the two capacity meters. */
-.capacity-meter.metric-change.state-live .capacity-fill::after,
-.capacity-meter.metric-change.state-limit .capacity-fill::after {
-  animation: swMeterGlint .62s linear 1 !important;
-  opacity: .62 !important;
-}
-
 /* The legacy app-level sample-hit class fires for every dial from one sample.
    It must not create synchronized visual activity. */
 .activity-ring.sample-hit {
@@ -142,38 +149,29 @@ No phase offsets or stagger are used to manufacture apparent independence.
    Wall view. Add ?view=wall or ?view=noc.
 
    Wall liveness is continuous only at the independently observable source
-   level. Individual metric carriers remain change-driven in both views.
+   level. Instead of a travelling line, a fresh source gets a slow local lamp
+   heartbeat. Individual metric carriers remain change-driven in both views.
    ------------------------------------------------------------ */
-@keyframes swWallPacket {
-  0% { transform: translateX(-58px); opacity: .20; }
-  16% { opacity: .92; }
-  84% { opacity: .78; }
-  100% { transform: translateX(15px); opacity: .20; }
+@keyframes swWallSourceAlive {
+  0%, 100% { transform: scale(.96); filter: brightness(.96); opacity: .78; }
+  50%      { transform: scale(1.22); filter: brightness(1.34); opacity: 1; }
 }
 
 /* Current web contract: Host + Process arrive in one Monitor.tick payload.
-   The Host -> Process lane is therefore the one collector liveness carrier. */
-body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-live:has(+ .source-node.state-live)::before,
-body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-limit:has(+ .source-node.state-live)::before {
-  animation: swWallPacket var(--sw-wall-cycle) linear infinite !important;
-  opacity: .9 !important;
+   Host owns the one collector liveness cue. */
+body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-live .source-lamp,
+body.view-wall.wall-collector-fresh .source-node[data-source="host"].state-limit .source-lamp {
+  animation: swWallSourceAlive var(--sw-wall-cycle) ease-in-out infinite !important;
 }
 
-/* Heartbeat writes are independently observable. Process -> Heartbeat owns
-   heartbeat liveness. */
-body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-live:has(+ .source-node.state-live)::before,
-body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-limit:has(+ .source-node.state-live)::before {
-  animation: swWallPacket var(--sw-wall-heartbeat-cycle) linear infinite !important;
-  opacity: .9 !important;
+/* Heartbeat writes are independently observable. Process owns the heartbeat cue. */
+body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-live .source-lamp,
+body.view-wall.wall-heartbeat-fresh .source-node[data-source="process"].state-limit .source-lamp {
+  animation: swWallSourceAlive var(--sw-wall-heartbeat-cycle) ease-in-out infinite !important;
 }
 
-/* Heartbeat -> Harness is not a duplicate heartbeat carrier. It moves only on
-   a real Harness metric change via the discrete sample-pulse class. */
-body.view-wall .source-node[data-source="heartbeat"].sample-pulse.state-live:has(+ .source-node.state-live)::before,
-body.view-wall .source-node[data-source="heartbeat"].sample-pulse.state-limit:has(+ .source-node.state-live)::before {
-  animation: swMaterialPacket var(--sw-sample-duration) linear 1 !important;
-  opacity: .9 !important;
-}
+/* Heartbeat -> Harness semantic activity remains a discrete local lamp pulse
+   via sample-pulse rather than a travelling lane carrier. */
 
 /* ------------------------------------------------------------
    Chassis density. Bordered columns end with their instruments instead of
@@ -203,12 +201,12 @@ body.view-wall .source-node[data-source="heartbeat"].sample-pulse.state-limit:ha
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .source-node.sample-pulse::before,
-  .counter-card.sample-update::after,
+  .source-node.sample-pulse .source-lamp,
+  body.view-wall.wall-collector-fresh .source-node .source-lamp,
+  body.view-wall.wall-heartbeat-fresh .source-node .source-lamp,
+  .counter-card.sample-update strong,
   .activity-ring.metric-change::after,
-  .capacity-meter.metric-change .capacity-fill::after,
-  body.view-wall.wall-collector-fresh .source-node::before,
-  body.view-wall.wall-heartbeat-fresh .source-node::before {
+  .capacity-meter.metric-change strong {
     animation: none !important;
   }
 }
