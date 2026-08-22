@@ -1,5 +1,5 @@
 /*
-ScriptWatch instrument compositor v0.1.0
+ScriptWatch instrument compositor v0.1.1
 
 Loads authored SVG instrument artwork into the live dashboard without changing
 collector or Harness semantics. v0.1 mounts the segmented-dial asset on CPU only.
@@ -46,7 +46,7 @@ change only.
 
   function assetText() {
     if (!assetTextPromise) {
-      assetTextPromise = fetch(ASSET_URL, { cache: "force-cache" }).then(response => {
+      assetTextPromise = fetch(ASSET_URL, { cache: "no-cache" }).then(response => {
         if (!response.ok) throw new Error(`SVG asset HTTP ${response.status}`);
         return response.text();
       });
