@@ -8,7 +8,7 @@
 
   <defs>
     <!-- ============ segment geometry ============ -->
-    <path id="seg-shape" d="M97.65,44.00 L102.35,44.00 L103.10,26.00 L96.90,26.00 Z"/>
+    <path id="seg-shape" d="M97.45,40.00 L102.55,40.00 L103.35,20.00 L96.65,20.00 Z"/>
 
     <!-- ============ gradients ============ -->
     <linearGradient id="grad-lit" x1="0" y1="1" x2="0" y2="0">
@@ -20,9 +20,9 @@
     </linearGradient>
 
     <linearGradient id="grad-off" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0"    stop-color="#0B141A"/>
-      <stop offset="0.75" stop-color="#122029"/>
-      <stop offset="1"    stop-color="#172A34"/>
+      <stop offset="0"    stop-color="#1B2B34"/>
+      <stop offset="0.55" stop-color="#263B46"/>
+      <stop offset="1"    stop-color="#33505D"/>
     </linearGradient>
 
     <radialGradient id="grad-face" cx="0.37" cy="0.30" r="0.86">
@@ -78,53 +78,60 @@
                    k1="0" k2="1" k3="1" k4="0"/>
     </filter>
 
-    <filter id="fx-bloom" x="-55%" y="-55%" width="210%" height="210%">
+    <!-- Bloom blur is applied once to the group, not per child. Toggling
+         child visibility re-runs it; that happens at telemetry cadence
+         (sub-1 Hz), never per animation frame. -->
+    <filter id="fx-bloom" x="-35%" y="-35%" width="170%" height="170%"
+            color-interpolation-filters="sRGB">
       <feGaussianBlur stdDeviation="2.0"/>
     </filter>
   </defs>
 
-  <!-- ============ static housing ============ -->
+  <!-- ================= HOUSING (static, filtered) ================= -->
   <g id="housing">
-    <circle cx="100" cy="100" r="92" fill="url(#grad-body)" stroke="#344C58" stroke-width="1.2"
-            filter="url(#fx-bezel)"/>
-    <circle cx="100" cy="100" r="87.5" fill="none" stroke="url(#grad-rimhi)" stroke-width="2.4"/>
-    <circle cx="100" cy="100" r="82" fill="none" stroke="#050A0D" stroke-width="4.8"/>
-    <circle cx="100" cy="100" r="79" fill="none" stroke="#1A2932" stroke-width="1.3"/>
+    <path d="M7.00,100.00 a93.00,93.00 0 1 0 186.00,0 a93.00,93.00 0 1 0 -186.00,0 Z M16.00,100.00 a84.00,84.00 0 1 1 168.00,0 a84.00,84.00 0 1 1 -168.00,0 Z" fill-rule="evenodd"
+          fill="url(#grad-body)" filter="url(#fx-bezel)"/>
+    <circle cx="100.0" cy="100.0" r="92.4" fill="none"
+            stroke="url(#grad-rimhi)" stroke-width="1.2"/>
+    <circle cx="100.0" cy="100.0" r="89.6" fill="none"
+            stroke="#0A1216" stroke-width="0.9" stroke-opacity="0.9"/>
+    <circle cx="100.0" cy="100.0" r="88.8" fill="none"
+            stroke="#2A3C46" stroke-width="0.5" stroke-opacity="0.55"/>
+    <circle cx="100.0" cy="100.0" r="84.4" fill="none"
+            stroke="url(#grad-recess)" stroke-width="1.6"/>
   </g>
 
-  <!-- ============ recessed well / scale ============ -->
+  <!-- ================= WELL (recessed face + scale) ================= -->
   <g id="well">
-    <circle cx="100" cy="100" r="78" fill="url(#grad-face)" stroke="#15242C" stroke-width="1.1"/>
-    <circle cx="100" cy="100" r="76.5" fill="none" stroke="url(#grad-recess)" stroke-width="2.8"/>
-    <circle cx="100" cy="100" r="50" fill="none" stroke="#0C171D" stroke-width="1"/>
-    <!-- scale ticks: 5 major, 15 minor. Kept outside face-off child list. -->
-    <g stroke="#334B58" stroke-linecap="round">
-      <path d="M100,46.5 L100,52.5" transform="rotate(230 100 100)" stroke-width="1.3"/>
-      <path d="M100,46.5 L100,52.5" transform="rotate(295 100 100)" stroke-width="1.3"/>
-      <path d="M100,46.5 L100,52.5" transform="rotate(360 100 100)" stroke-width="1.3"/>
-      <path d="M100,46.5 L100,52.5" transform="rotate(425 100 100)" stroke-width="1.3"/>
-      <path d="M100,46.5 L100,52.5" transform="rotate(490 100 100)" stroke-width="1.3"/>
-      <g stroke="#223640" stroke-width="0.8">
-        <path d="M100,48.5 L100,52.0" transform="rotate(246.25 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(262.50 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(278.75 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(311.25 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(327.50 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(343.75 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(376.25 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(392.50 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(408.75 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(441.25 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(457.50 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(473.75 100 100)"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(214.0 100 100)" opacity="0"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(506.0 100 100)" opacity="0"/>
-        <path d="M100,48.5 L100,52.0" transform="rotate(360 100 100)" opacity="0"/>
-      </g>
-    </g>
+    <circle cx="100.0" cy="100.0" r="84.0" fill="url(#grad-face)"/>
+    <circle cx="100.0" cy="100.0" r="83.4" fill="none"
+            stroke="url(#grad-recess)" stroke-width="2.4" stroke-opacity="0.75"/>
+    <circle cx="100.0" cy="100.0" r="50.5" fill="none"
+            stroke="#101C22" stroke-width="0.8"/>
+    <line x1="59.40" y1="134.07" x2="56.72" y2="136.32" stroke="#2B4049" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="51.97" y1="77.60" x2="48.79" y2="76.12" stroke="#2B4049" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="100.00" y1="47.00" x2="100.00" y2="43.50" stroke="#2B4049" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="148.03" y1="77.60" x2="151.21" y2="76.12" stroke="#2B4049" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="140.60" y1="134.07" x2="143.28" y2="136.32" stroke="#2B4049" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="51.71" y1="124.61" x2="49.93" y2="125.51" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="47.41" y1="113.11" x2="45.47" y2="113.60" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="45.81" y1="100.95" x2="43.81" y2="100.98" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="46.98" y1="88.73" x2="45.03" y2="88.32" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="57.29" y1="66.63" x2="55.71" y2="65.40" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="65.89" y1="57.88" x2="64.63" y2="56.32" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="76.24" y1="51.29" x2="75.36" y2="49.49" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="87.81" y1="47.19" x2="87.36" y2="45.24" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="112.19" y1="47.19" x2="112.64" y2="45.24" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="123.76" y1="51.29" x2="124.64" y2="49.49" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="134.11" y1="57.88" x2="135.37" y2="56.32" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="142.71" y1="66.63" x2="144.29" y2="65.40" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="153.02" y1="88.73" x2="154.97" y2="88.32" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="154.19" y1="100.95" x2="156.19" y2="100.98" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="152.59" y1="113.11" x2="154.53" y2="113.60" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="148.29" y1="124.61" x2="150.07" y2="125.51" stroke="#1D2C34" stroke-width="0.7" stroke-linecap="round"/>
   </g>
 
-  <!-- ============ unlit segment ring ============ -->
+  <!-- ================= FACE-OFF (unlit ring, 36 children) ================= -->
   <g id="face-off" fill="url(#grad-off)">
       <use href="#seg-shape" transform="rotate(230.000 100.0 100.0)"/>
       <use href="#seg-shape" transform="rotate(237.429 100.0 100.0)"/>
@@ -164,7 +171,8 @@
       <use href="#seg-shape" transform="rotate(490.000 100.0 100.0)"/>
   </g>
 
-  <!-- ============ emissive bloom beneath lit geometry ============ -->
+  <!-- ================= BLOOM (emissive copy, beneath face-lit) ================= -->
+  <!-- Mirrors face-lit child order. Subordinate by design: group opacity 0.5. -->
   <g id="bloom" fill="#5CEFB0" filter="url(#fx-bloom)"
      opacity="0.5" style="mix-blend-mode:screen">
       <use href="#seg-shape" transform="rotate(230.000 100.0 100.0)" visibility="hidden"/>
@@ -205,7 +213,7 @@
       <use href="#seg-shape" transform="rotate(490.000 100.0 100.0)" visibility="hidden"/>
   </g>
 
-  <!-- ============ crisp illuminated segment ring ============ -->
+  <!-- ================= FACE-LIT (36 children, low -> high) ================= -->
   <g id="face-lit" fill="url(#grad-lit)">
       <use href="#seg-shape" transform="rotate(230.000 100.0 100.0)" visibility="hidden"/>
       <use href="#seg-shape" transform="rotate(237.429 100.0 100.0)" visibility="hidden"/>
@@ -245,19 +253,18 @@
       <use href="#seg-shape" transform="rotate(490.000 100.0 100.0)" visibility="hidden"/>
   </g>
 
-  <!-- ============ source-liveness carrier ============ -->
-  <!-- No filter: compositor may rotate this every frame at transform cost only. -->
+  <!-- ================= ACTIVITY (source liveness; value-independent) ================= -->
+  <!-- Unfiltered on purpose: rotate(theta 100 100) is cheap and exact. -->
   <g id="activity">
-    <path d="M59.8,35.3 A76,76 0 0 1 75.2,28.2"
-          fill="none" stroke="url(#grad-activity)" stroke-width="3.2" stroke-linecap="round"/>
-    <path d="M62.4,37.1 A73,73 0 0 1 75.8,31.1"
-          fill="none" stroke="#86FFD0" stroke-opacity="0.28" stroke-width="1.0" stroke-linecap="round"/>
+    <path d="M77.34,20.98 A82.20,82.20 0 0 1 122.66,20.98" fill="none" stroke="url(#grad-activity)"
+          stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M94.27,18.00 A82.20,82.20 0 0 1 105.73,18.00" fill="none" stroke="#E8FFF5"
+          stroke-width="2.6" stroke-linecap="round" stroke-opacity="0.9"/>
   </g>
 
-  <!-- ============ value-change acknowledgement ============ -->
-  <!-- Invisible at rest. Transform + opacity only; no filters. -->
+  <!-- ================= GLINT (value-change acknowledgement) ================= -->
+  <!-- Resting state is invisible. Compositor reveals and translates it. -->
   <g id="glint" opacity="0" style="mix-blend-mode:plus-lighter">
-    <path d="M56.5,37.0 A76,76 0 0 1 96.5,24.1"
-          fill="none" stroke="url(#grad-glint)" stroke-width="5.5" stroke-linecap="round"/>
+    <path d="M64.40,27.02 A81.20,81.20 0 0 1 135.60,27.02 L125.78,47.15 A58.80,58.80 0 0 0 74.22,47.15 Z" fill="url(#grad-glint)"/>
   </g>
 </svg>
