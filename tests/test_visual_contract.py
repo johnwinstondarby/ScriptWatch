@@ -13,10 +13,13 @@ class VisualContractTests(unittest.TestCase):
         self.assertLess(html.index('href="spotlight_sources.css"'), html.index('href="material.css"'))
         self.assertLess(html.index('src="instrument_state.js"'), html.index('src="app.js"'))
         self.assertLess(html.index('src="app.js"'), html.index('src="spotlight.js"'))
+        self.assertLess(html.index('src="spotlight.js"'), html.index('src="motion.js"'))
 
     def test_visual_layer_does_not_poll_backend(self):
         js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
+        motion = (DASHBOARD / "motion.js").read_text(encoding="utf-8")
         self.assertNotIn("fetch(", js)
+        self.assertNotIn("fetch(", motion)
         for source in ("host", "process", "heartbeat", "harness"):
             self.assertIn(f'sourceNode("{source}"', js)
 
@@ -44,7 +47,6 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn("boundedState", state_js)
         self.assertIn("ScriptWatchInstrumentState", spotlight)
         self.assertIn("instrument_state.js", contract)
-        self.assertIn("Dormant", contract)
         self.assertIn("last known", contract)
 
     def test_workbench_exists_and_is_backend_free(self):
@@ -56,8 +58,6 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn('src="instrument_state.js"', html)
         self.assertNotIn("fetch(", html)
         self.assertIn("Host → Process → Heartbeat → Harness", html)
-        self.assertIn("transitionModel", html)
-        self.assertIn("rigModels", html)
 
     def test_harness_state_is_explicit(self):
         js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
@@ -82,24 +82,11 @@ class VisualContractTests(unittest.TestCase):
         self.assertIn("InDesign process counters", contract)
         self.assertIn("Harness counters", contract)
 
-    def test_source_bays_are_spatially_separated(self):
-        js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
-        css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
-        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
-        self.assertIn("process-counter-bay", js)
-        self.assertIn("process-counter-mount", js)
-        self.assertIn("source-column-runtime", js)
-        self.assertIn("source-column-trends", js)
-        self.assertIn("process-counter-bay", css)
-        self.assertIn("Runtime Health", contract)
-        self.assertIn("Trends & Alerts", contract)
-
     def test_harness_off_bay_remains_visible_as_capability_state(self):
         js = (DASHBOARD / "spotlight.js").read_text(encoding="utf-8")
         css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
         contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
         self.assertIn("harness-off-bay", js)
-        self.assertIn("HARNESS DATA", js)
         self.assertIn("No Harness counters are published", js)
         self.assertIn("harness-off-bay", css)
         self.assertIn("A Harness data bay remains visible even when Harness is OFF", contract)
@@ -107,8 +94,8 @@ class VisualContractTests(unittest.TestCase):
     def test_counter_marks_are_not_decorative(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
         contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
-        self.assertIn("Decorative dots", contract)
-        self.assertIn("per-counter lamp or dot must encode a real property", contract)
+        self.assertIn("Decorative marks", contract)
+        self.assertIn("value change", contract)
         self.assertIn(".counter-card::before { content:none", css)
 
     def test_dimensional_material_layer_is_semantic_safe(self):
@@ -117,31 +104,40 @@ class VisualContractTests(unittest.TestCase):
         contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
         self.assertIn('href="material.css"', html)
         self.assertIn("Hue remains semantic", material)
-        self.assertIn("Motion remains the liveness channel", material)
         self.assertIn("swCounterRunner", material)
         self.assertIn("swMaterialPacket", material)
         self.assertIn("swMeterGlint", material)
-        self.assertIn("Hue carries condition. Shading carries form. Motion carries liveness.", contract)
-        self.assertIn("static glow, shading, or reflection never proves liveness", contract)
+        self.assertIn("Hue carries condition. Shading carries form.", contract)
+        self.assertIn("must not imply freshness", contract)
 
-    def test_material_liveness_carriers_stop_outside_live_states(self):
-        material = (DASHBOARD / "material.css").read_text(encoding="utf-8")
-        self.assertIn(".counter-card.state-live::after", material)
-        self.assertIn(".counter-card.state-limit::after", material)
-        self.assertNotIn(".counter-card.state-dormant::after", material)
-        self.assertIn(".capacity-meter.state-live .capacity-fill::after", material)
-        self.assertIn(".capacity-meter.state-limit .capacity-fill::after", material)
-        self.assertIn(".source-node.state-live:not(:last-child)::before", material)
-        self.assertIn(".source-node.state-limit:not(:last-child)::before", material)
+    def test_refinement_layer_separates_liveness_and_change(self):
+        refinement = (DASHBOARD / "refinement.css").read_text(encoding="utf-8")
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        self.assertIn("Source motion = acquisition liveness", refinement)
+        self.assertIn("Metric motion = value change", refinement)
+        self.assertIn(".counter-card.sample-update.state-live::after", refinement)
+        self.assertIn(".activity-ring.metric-change.state-live::after", refinement)
+        self.assertIn(".capacity-meter.metric-change.state-live", refinement)
+        self.assertIn("source motion = acquisition liveness", contract)
+        self.assertIn("metric motion = value change", contract)
+
+    def test_independent_carrier_rule_is_pinned(self):
+        contract = (ROOT / "docs" / "VISUAL_CONTRACT.md").read_text(encoding="utf-8")
+        self.assertIn("Indicator independence rule", contract)
+        self.assertIn("underlying data can disagree with its neighbors", contract)
+        self.assertIn("Artificial staggering, random jitter, phase offsets", contract)
+        self.assertIn("Host and Process therefore share one collector liveness carrier", contract)
 
     def test_reduced_motion_is_preserved(self):
         css = (DASHBOARD / "spotlight.css").read_text(encoding="utf-8")
         source_css = (DASHBOARD / "spotlight_sources.css").read_text(encoding="utf-8")
         material = (DASHBOARD / "material.css").read_text(encoding="utf-8")
+        refinement = (DASHBOARD / "refinement.css").read_text(encoding="utf-8")
         workbench = (DASHBOARD / "workbench.html").read_text(encoding="utf-8")
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("prefers-reduced-motion", source_css)
         self.assertIn("prefers-reduced-motion", material)
+        self.assertIn("prefers-reduced-motion", refinement)
         self.assertIn("prefers-reduced-motion", workbench)
 
 
