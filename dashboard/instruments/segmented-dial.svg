@@ -1,0 +1,263 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"
+     role="img" aria-label="Segmented dial instrument">
+  <!-- ScriptWatch segmented dial instrument v0.1
+       Artwork only. No animation, no text, no telemetry logic.
+       Public contract: housing, well, face-off, bloom, face-lit, activity, glint
+       face-lit and bloom each expose exactly 36 direct children,
+       ordered child 0 = lowest value ... child 35 = highest value. -->
+
+  <defs>
+    <!-- ============ segment geometry ============ -->
+    <path id="seg-shape" d="M97.65,44.00 L102.35,44.00 L103.10,26.00 L96.90,26.00 Z"/>
+
+    <!-- ============ gradients ============ -->
+    <linearGradient id="grad-lit" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0"    stop-color="#0A4F35"/>
+      <stop offset="0.34" stop-color="#179A63"/>
+      <stop offset="0.68" stop-color="#31E08F"/>
+      <stop offset="0.90" stop-color="#8DF7C6"/>
+      <stop offset="1"    stop-color="#E4FFF3"/>
+    </linearGradient>
+
+    <linearGradient id="grad-off" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0"    stop-color="#0B141A"/>
+      <stop offset="0.75" stop-color="#122029"/>
+      <stop offset="1"    stop-color="#172A34"/>
+    </linearGradient>
+
+    <radialGradient id="grad-face" cx="0.37" cy="0.30" r="0.86">
+      <stop offset="0"    stop-color="#16242D"/>
+      <stop offset="0.62" stop-color="#0A1218"/>
+      <stop offset="1"    stop-color="#03070A"/>
+    </radialGradient>
+
+    <linearGradient id="grad-body" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0"    stop-color="#1E2C35"/>
+      <stop offset="0.45" stop-color="#101B22"/>
+      <stop offset="1"    stop-color="#070D11"/>
+    </linearGradient>
+
+    <linearGradient id="grad-rimhi" x1="0.25" y1="0" x2="0.75" y2="1">
+      <stop offset="0"    stop-color="#4C6B7A" stop-opacity="0.85"/>
+      <stop offset="0.40" stop-color="#22333D" stop-opacity="0.30"/>
+      <stop offset="1"    stop-color="#0B1418" stop-opacity="0.65"/>
+    </linearGradient>
+
+    <linearGradient id="grad-recess" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0"    stop-color="#000000" stop-opacity="0.85"/>
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0.18"/>
+      <stop offset="1"    stop-color="#3A5563" stop-opacity="0.30"/>
+    </linearGradient>
+
+    <!-- activity tracer: soft ends via gradient, deliberately unfiltered
+         so the compositor can rotate it without re-running a filter -->
+    <linearGradient id="grad-activity" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="#31E08F" stop-opacity="0"/>
+      <stop offset="0.5"  stop-color="#B4FFDF" stop-opacity="1"/>
+      <stop offset="1"    stop-color="#31E08F" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="grad-glint" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="#CFFFE9" stop-opacity="0"/>
+      <stop offset="0.5"  stop-color="#EAFFF6" stop-opacity="0.75"/>
+      <stop offset="1"    stop-color="#CFFFE9" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- ============ filters ============ -->
+    <!-- STATIC ONLY. Housing chrome. sRGB interpolation keeps the specular
+         from washing out under the default linearRGB pipeline. -->
+    <filter id="fx-bezel" x="-25%" y="-25%" width="150%" height="150%"
+            color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.1" result="b"/>
+      <feSpecularLighting in="b" surfaceScale="4.6" specularConstant="0.78"
+                          specularExponent="26" lighting-color="#C2DCEC" result="s">
+        <fePointLight x="46" y="20" z="118"/>
+      </feSpecularLighting>
+      <feComposite in="s" in2="SourceAlpha" operator="in" result="sc"/>
+      <feComposite in="SourceGraphic" in2="sc" operator="arithmetic"
+                   k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+
+    <filter id="fx-bloom" x="-55%" y="-55%" width="210%" height="210%">
+      <feGaussianBlur stdDeviation="2.0"/>
+    </filter>
+  </defs>
+
+  <!-- ============ static housing ============ -->
+  <g id="housing">
+    <circle cx="100" cy="100" r="92" fill="url(#grad-body)" stroke="#344C58" stroke-width="1.2"
+            filter="url(#fx-bezel)"/>
+    <circle cx="100" cy="100" r="87.5" fill="none" stroke="url(#grad-rimhi)" stroke-width="2.4"/>
+    <circle cx="100" cy="100" r="82" fill="none" stroke="#050A0D" stroke-width="4.8"/>
+    <circle cx="100" cy="100" r="79" fill="none" stroke="#1A2932" stroke-width="1.3"/>
+  </g>
+
+  <!-- ============ recessed well / scale ============ -->
+  <g id="well">
+    <circle cx="100" cy="100" r="78" fill="url(#grad-face)" stroke="#15242C" stroke-width="1.1"/>
+    <circle cx="100" cy="100" r="76.5" fill="none" stroke="url(#grad-recess)" stroke-width="2.8"/>
+    <circle cx="100" cy="100" r="50" fill="none" stroke="#0C171D" stroke-width="1"/>
+    <!-- scale ticks: 5 major, 15 minor. Kept outside face-off child list. -->
+    <g stroke="#334B58" stroke-linecap="round">
+      <path d="M100,46.5 L100,52.5" transform="rotate(230 100 100)" stroke-width="1.3"/>
+      <path d="M100,46.5 L100,52.5" transform="rotate(295 100 100)" stroke-width="1.3"/>
+      <path d="M100,46.5 L100,52.5" transform="rotate(360 100 100)" stroke-width="1.3"/>
+      <path d="M100,46.5 L100,52.5" transform="rotate(425 100 100)" stroke-width="1.3"/>
+      <path d="M100,46.5 L100,52.5" transform="rotate(490 100 100)" stroke-width="1.3"/>
+      <g stroke="#223640" stroke-width="0.8">
+        <path d="M100,48.5 L100,52.0" transform="rotate(246.25 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(262.50 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(278.75 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(311.25 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(327.50 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(343.75 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(376.25 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(392.50 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(408.75 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(441.25 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(457.50 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(473.75 100 100)"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(214.0 100 100)" opacity="0"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(506.0 100 100)" opacity="0"/>
+        <path d="M100,48.5 L100,52.0" transform="rotate(360 100 100)" opacity="0"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ============ unlit segment ring ============ -->
+  <g id="face-off" fill="url(#grad-off)">
+      <use href="#seg-shape" transform="rotate(230.000 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(237.429 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(244.857 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(252.286 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(259.714 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(267.143 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(274.571 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(282.000 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(289.429 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(296.857 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(304.286 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(311.714 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(319.143 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(326.571 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(334.000 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(341.429 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(348.857 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(356.286 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(363.714 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(371.143 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(378.571 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(386.000 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(393.429 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(400.857 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(408.286 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(415.714 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(423.143 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(430.571 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(438.000 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(445.429 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(452.857 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(460.286 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(467.714 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(475.143 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(482.571 100.0 100.0)"/>
+      <use href="#seg-shape" transform="rotate(490.000 100.0 100.0)"/>
+  </g>
+
+  <!-- ============ emissive bloom beneath lit geometry ============ -->
+  <g id="bloom" fill="#5CEFB0" filter="url(#fx-bloom)"
+     opacity="0.5" style="mix-blend-mode:screen">
+      <use href="#seg-shape" transform="rotate(230.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(237.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(244.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(252.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(259.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(267.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(274.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(282.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(289.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(296.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(304.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(311.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(319.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(326.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(334.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(341.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(348.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(356.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(363.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(371.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(378.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(386.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(393.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(400.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(408.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(415.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(423.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(430.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(438.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(445.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(452.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(460.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(467.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(475.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(482.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(490.000 100.0 100.0)" visibility="hidden"/>
+  </g>
+
+  <!-- ============ crisp illuminated segment ring ============ -->
+  <g id="face-lit" fill="url(#grad-lit)">
+      <use href="#seg-shape" transform="rotate(230.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(237.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(244.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(252.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(259.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(267.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(274.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(282.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(289.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(296.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(304.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(311.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(319.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(326.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(334.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(341.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(348.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(356.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(363.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(371.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(378.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(386.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(393.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(400.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(408.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(415.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(423.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(430.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(438.000 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(445.429 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(452.857 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(460.286 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(467.714 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(475.143 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(482.571 100.0 100.0)" visibility="hidden"/>
+      <use href="#seg-shape" transform="rotate(490.000 100.0 100.0)" visibility="hidden"/>
+  </g>
+
+  <!-- ============ source-liveness carrier ============ -->
+  <!-- No filter: compositor may rotate this every frame at transform cost only. -->
+  <g id="activity">
+    <path d="M59.8,35.3 A76,76 0 0 1 75.2,28.2"
+          fill="none" stroke="url(#grad-activity)" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M62.4,37.1 A73,73 0 0 1 75.8,31.1"
+          fill="none" stroke="#86FFD0" stroke-opacity="0.28" stroke-width="1.0" stroke-linecap="round"/>
+  </g>
+
+  <!-- ============ value-change acknowledgement ============ -->
+  <!-- Invisible at rest. Transform + opacity only; no filters. -->
+  <g id="glint" opacity="0" style="mix-blend-mode:plus-lighter">
+    <path d="M56.5,37.0 A76,76 0 0 1 96.5,24.1"
+          fill="none" stroke="url(#grad-glint)" stroke-width="5.5" stroke-linecap="round"/>
+  </g>
+</svg>
