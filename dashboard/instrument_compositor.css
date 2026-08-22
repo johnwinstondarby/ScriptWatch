@@ -1,0 +1,76 @@
+/*
+ScriptWatch authored-instrument compositor layer v0.1.0
+
+The SVG owns physical form. Existing HTML owns numbers, labels, and accessibility.
+This layer suppresses only the legacy CSS ring once an authored SVG has mounted.
+*/
+
+.ring-gauge.svg-instrument-mounted {
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.ring-gauge.svg-instrument-mounted::before,
+.ring-gauge.svg-instrument-mounted::after {
+  content: none !important;
+  display: none !important;
+  animation: none !important;
+}
+
+.ring-gauge.svg-instrument-mounted .svg-instrument-art {
+  position: absolute;
+  inset: -5px;
+  width: calc(100% + 10px);
+  height: calc(100% + 10px);
+  max-width: none;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+  transition: filter .22s ease, opacity .22s ease;
+}
+
+.ring-gauge.svg-instrument-mounted .ring-center {
+  z-index: 3;
+}
+
+.ring-gauge.svg-instrument-mounted .ring-center strong {
+  color: #effff8;
+  text-shadow: 0 0 10px rgba(111, 255, 187, .18), 0 1px 1px rgba(0,0,0,.8);
+}
+
+.ring-gauge.svg-instrument-mounted .ring-center span {
+  color: #70868f;
+  text-shadow: 0 1px 1px rgba(0,0,0,.85);
+}
+
+/* State is still owned by the existing ScriptWatch state machine. The SVG
+   compositor changes its internal lit ramp; these restrained outer treatments
+   make never/fault states legible even when all value segments are hidden. */
+.ring-gauge.svg-instrument-mounted.state-dormant .svg-instrument-art,
+.telemetry-stale .ring-gauge.svg-instrument-mounted .svg-instrument-art {
+  filter: drop-shadow(0 0 5px rgba(245, 173, 50, .18)) saturate(.92);
+}
+
+.ring-gauge.svg-instrument-mounted.state-limit .svg-instrument-art {
+  filter: drop-shadow(0 0 6px rgba(228, 104, 42, .24));
+}
+
+.ring-gauge.svg-instrument-mounted.state-fault .svg-instrument-art,
+.telemetry-fault .ring-gauge.svg-instrument-mounted .svg-instrument-art {
+  filter: drop-shadow(0 0 7px rgba(255, 93, 104, .32)) saturate(.72);
+}
+
+.ring-gauge.svg-instrument-mounted.state-never .svg-instrument-art,
+.ring-gauge.svg-instrument-mounted.state-unsupported .svg-instrument-art {
+  opacity: .72;
+  filter: saturate(.42) brightness(.76);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring-gauge.svg-instrument-mounted .svg-instrument-art {
+    transition: none;
+  }
+}
