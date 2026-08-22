@@ -1,13 +1,15 @@
 /*
-ScriptWatch authored-instrument diagnostics v0.3.0
+ScriptWatch authored-instrument diagnostics v0.4.0
 
 Independent observation layer for compositor acceptance. It does not drive
 telemetry, artwork state, or motion. It records what the rendered dashboard did
 so value-change glints can be verified without relying on video timing.
 
-v0.3 keeps the v0.2 timestamped event/lockstep diagnostics and aligns glint
-eligibility with the production contract: the rendered string must change while
-both the prior and current instrument states are active (LIVE or AT_LIMIT).
+v0.4 separates semantic glint issuance from browser rendering. The compositor
+increments data-sw-glint-seq synchronously when it decides a metric-change glint
+has been earned. Diagnostics compare that issued-event sequence against
+independently observed rendered-value changes. Opacity/rAF starts remain a
+secondary rendering observation and are not the semantic acceptance gate.
 */
 
 (() => {
@@ -58,6 +60,11 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
     return activity.getAttribute("visibility") !== "hidden";
   }
 
+  function glintSequence(glint) {
+    const value = Number(glint?.dataset?.swGlintSeq || 0);
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+  }
+
   function installSampleObserver() {
     const marker = document.getElementById("counter-bank-state");
     if (!marker) {
@@ -88,11 +95,14 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
       installed: true,
       valueChanges: 0,
       eligibleValueChanges: 0,
-      glintStarts: 0,
+      glintEventsIssued: 0,
+      renderedGlintStarts: 0,
       valueEvents: [],
-      glintEvents: [],
+      glintIssueEvents: [],
+      renderedGlintEvents: [],
       lastValue: displayValue(valueNode.textContent),
       lastState: stateOf(gauge),
+      lastGlintSeq: glintSequence(glint),
       lastGlintOpacity: Number(glint.getAttribute("opacity") || 0) || 0
     };
     stats.metrics[config.key] = metric;
@@ -130,11 +140,38 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
     });
     stateObserver.observe(gauge, { attributes: true, attributeFilter: ["class"] });
 
-    const glintObserver = new MutationObserver(() => {
+    const issueObserver = new MutationObserver(() => {
+      const currentSeq = glintSequence(glint);
+      if (currentSeq <= metric.lastGlintSeq) {
+        metric.lastGlintSeq = currentSeq;
+        return;
+      }
+
+      // Sequence deltas are counted even if several attribute updates are
+      // delivered in one MutationObserver batch. The compositor owns the event
+      // identity; browser frame scheduling cannot erase an issued event.
+      for (let seq = metric.lastGlintSeq + 1; seq <= currentSeq; seq += 1) {
+        metric.glintEventsIssued += 1;
+        metric.glintIssueEvents.push({
+          tMs: elapsedMs(),
+          sampleEvent: stats.sampleEvents,
+          seq,
+          value: glint.dataset.swGlintValue || displayValue(valueNode.textContent),
+          state: glint.dataset.swGlintState || stateOf(gauge)
+        });
+      }
+      metric.lastGlintSeq = currentSeq;
+    });
+    issueObserver.observe(glint, { attributes: true, attributeFilter: ["data-sw-glint-seq"] });
+
+    // Rendering observation is intentionally secondary. DevTools, background
+    // throttling, or a delayed animation frame may prevent a visible sweep from
+    // starting even though the semantic glint event was correctly issued.
+    const renderedObserver = new MutationObserver(() => {
       const opacity = Number(glint.getAttribute("opacity") || 0) || 0;
       if (metric.lastGlintOpacity <= 0.001 && opacity > 0.001) {
-        metric.glintStarts += 1;
-        metric.glintEvents.push({
+        metric.renderedGlintStarts += 1;
+        metric.renderedGlintEvents.push({
           tMs: elapsedMs(),
           sampleEvent: stats.sampleEvents,
           value: displayValue(valueNode.textContent),
@@ -143,7 +180,7 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
       }
       metric.lastGlintOpacity = opacity;
     });
-    glintObserver.observe(glint, { attributes: true, attributeFilter: ["opacity"] });
+    renderedObserver.observe(glint, { attributes: true, attributeFilter: ["opacity"] });
   }
 
   function pairGlintEvents(left, right, toleranceMs) {
@@ -167,7 +204,9 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
           rightMs: match.tMs,
           deltaMs: bestDelta,
           leftSample: event.sampleEvent,
-          rightSample: match.sampleEvent
+          rightSample: match.sampleEvent,
+          leftSeq: event.seq,
+          rightSeq: match.seq
         });
       }
     }
@@ -175,20 +214,21 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
   }
 
   function lockstep(toleranceMs = 25) {
-    const left = stats.metrics.cpu?.glintEvents || [];
-    const right = stats.metrics.ram?.glintEvents || [];
+    const left = stats.metrics.cpu?.glintIssueEvents || [];
+    const right = stats.metrics.ram?.glintIssueEvents || [];
     const tolerance = Math.max(0, Number(toleranceMs) || 25);
     const pairs = pairGlintEvents(left, right, tolerance);
     const denominator = Math.min(left.length, right.length);
     const ratio = denominator ? pairs.length / denominator : 0;
     return {
+      channel: "semantic-glint-issued",
       toleranceMs: tolerance,
       cpuGlints: left.length,
       ramGlints: right.length,
       pairedGlints: pairs.length,
       pairedRatio: Number(ratio.toFixed(3)),
       suspectedLockstep: denominator >= 2 && ratio >= 0.8,
-      note: "Lockstep is a diagnostic trigger. After rendered-string binding, coincident glints are acceptable only when both displayed metrics genuinely changed.",
+      note: "Lockstep is a diagnostic trigger. Coincident issued glints are acceptable only when both displayed metrics genuinely changed.",
       pairs
     };
   }
@@ -204,6 +244,7 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
           metric: config.key,
           event: "value-change",
           sampleEvent: event.sampleEvent,
+          seq: "",
           value: event.value,
           previous: event.previous,
           previousState: event.previousState,
@@ -211,12 +252,27 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
           eligible: event.eligible
         });
       }
-      for (const event of metric.glintEvents || []) {
+      for (const event of metric.glintIssueEvents || []) {
         rows.push({
           tMs: event.tMs,
           metric: config.key,
-          event: "glint-start",
+          event: "glint-issued",
           sampleEvent: event.sampleEvent,
+          seq: event.seq,
+          value: event.value,
+          previous: "",
+          previousState: "",
+          state: event.state,
+          eligible: ""
+        });
+      }
+      for (const event of metric.renderedGlintEvents || []) {
+        rows.push({
+          tMs: event.tMs,
+          metric: config.key,
+          event: "glint-rendered",
+          sampleEvent: event.sampleEvent,
+          seq: "",
           value: event.value,
           previous: "",
           previousState: "",
@@ -225,7 +281,7 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
         });
       }
     }
-    rows.sort((a, b) => a.tMs - b.tMs || a.metric.localeCompare(b.metric));
+    rows.sort((a, b) => a.tMs - b.tMs || a.metric.localeCompare(b.metric) || a.event.localeCompare(b.event));
     return rows;
   }
 
@@ -236,6 +292,9 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
       const metric = stats.metrics[config.key] || {};
       const svg = gauge?.querySelector("svg[data-sw-instrument='segmented-dial']");
       const activity = activityVisible(gauge);
+      const issued = metric.glintEventsIssued || 0;
+      const rendered = metric.renderedGlintStarts || 0;
+      const eligible = metric.eligibleValueChanges || 0;
       metrics[config.key] = {
         mounted: Boolean(svg),
         namespace: svg?.dataset.swInstance || null,
@@ -243,13 +302,15 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
         value: displayValue(document.getElementById(config.valueId)?.textContent),
         litSegments: visibleSegmentCount(gauge),
         valueChanges: metric.valueChanges || 0,
-        eligibleValueChanges: metric.eligibleValueChanges || 0,
-        glintStarts: metric.glintStarts || 0,
-        glintMatchesEligibleChanges: (metric.glintStarts || 0) === (metric.eligibleValueChanges || 0),
+        eligibleValueChanges: eligible,
+        glintEventsIssued: issued,
+        renderedGlintStarts: rendered,
+        glintMatchesEligibleChanges: issued === eligible,
         activityVisible: activity,
         sharedSourceActivityCorrect: activity === false,
         valueChangeTimesMs: (metric.valueEvents || []).map(event => event.tMs),
-        glintStartTimesMs: (metric.glintEvents || []).map(event => event.tMs)
+        glintIssueTimesMs: (metric.glintIssueEvents || []).map(event => event.tMs),
+        renderedGlintStartTimesMs: (metric.renderedGlintEvents || []).map(event => event.tMs)
       };
     }
     return {
@@ -283,12 +344,15 @@ both the prior and current instrument states are active (LIVE or AT_LIMIT).
       if (!metric) continue;
       metric.valueChanges = 0;
       metric.eligibleValueChanges = 0;
-      metric.glintStarts = 0;
+      metric.glintEventsIssued = 0;
+      metric.renderedGlintStarts = 0;
       metric.valueEvents = [];
-      metric.glintEvents = [];
+      metric.glintIssueEvents = [];
+      metric.renderedGlintEvents = [];
       metric.lastValue = displayValue(document.getElementById(config.valueId)?.textContent);
       metric.lastState = stateOf(document.getElementById(config.gaugeId));
       const glint = document.getElementById(config.gaugeId)?.querySelector('[data-sw-role="glint"]');
+      metric.lastGlintSeq = glintSequence(glint);
       metric.lastGlintOpacity = Number(glint?.getAttribute("opacity") || 0) || 0;
     }
     return snapshot();
