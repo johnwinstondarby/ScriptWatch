@@ -1,14 +1,19 @@
 /*
-ScriptWatch instrument compositor v0.3.0
+ScriptWatch instrument compositor v0.4.0
 
 Loads authored SVG instrument artwork into the live dashboard without changing
-collector or Harness semantics. v0.3 mounts the segmented-dial asset on CPU and
+collector or Harness semantics. v0.4 mounts the segmented-dial asset on CPU and
 RAM; Commit remains on the legacy CSS dial for side-by-side acceptance.
 
 The compositor keeps three telemetry channels distinct:
 - raw numeric value drives dial magnitude;
 - the rendered operator-visible string drives metric-change acknowledgement;
 - source events own acquisition liveness.
+
+A metric-change acknowledgement now has an explicit semantic event boundary.
+The compositor increments data-sw-glint-seq synchronously before scheduling any
+requestAnimationFrame work. Diagnostics can therefore verify that the compositor
+issued the event without confusing browser paint scheduling with event truth.
 
 CPU and RAM embedded activity carriers remain disabled because CPU, RAM, and
 Commit currently share one Monitor.tick() acquisition event.
@@ -222,6 +227,15 @@ Commit currently share one Monitor.tick() acquisition event.
     instance.handles.glint.setAttribute("opacity", "0");
   }
 
+  function issueGlint(instance, displayedValue, state) {
+    const glint = instance.handles.glint;
+    instance.glintSeq += 1;
+    glint.dataset.swGlintSeq = String(instance.glintSeq);
+    glint.dataset.swGlintValue = displayedValue || "";
+    glint.dataset.swGlintState = state || "";
+    fireGlint(instance);
+  }
+
   function fireGlint(instance) {
     const glint = instance.handles.glint;
     const token = ++instance.glintToken;
@@ -278,7 +292,7 @@ Commit currently share one Monitor.tick() acquisition event.
     // Re-entry from dormant/fault/never/unsupported is excluded because that is
     // source recovery, which belongs to the liveness channel.
     if (displayChanged && stableActiveState) {
-      fireGlint(instance);
+      issueGlint(instance, displayedValue, state);
     }
     if (!activeMetricState(state)) cancelGlint(instance);
 
@@ -332,6 +346,7 @@ Commit currently share one Monitor.tick() acquisition event.
       lastDisplayedValue: null,
       lastState: null,
       lastLitCount: -1,
+      glintSeq: 0,
       glintToken: 0,
       syncQueued: false,
       observer: null,
@@ -340,6 +355,9 @@ Commit currently share one Monitor.tick() acquisition event.
 
     // The authored SVG is inserted only after its contract validates. Until
     // this point the legacy CSS dial remains untouched and is the fail-safe.
+    instance.handles.glint.dataset.swGlintSeq = "0";
+    instance.handles.glint.dataset.swGlintValue = "";
+    instance.handles.glint.dataset.swGlintState = "";
     gauge.insertBefore(svg, gauge.firstChild);
     gauge.classList.add("svg-instrument-mounted");
     gauge.classList.remove("activity-ring");
