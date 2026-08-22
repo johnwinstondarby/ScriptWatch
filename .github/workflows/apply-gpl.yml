@@ -1,0 +1,81 @@
+name: Apply GPL-3.0-or-later
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/apply-gpl.yml]
+permissions:
+  contents: write
+jobs:
+  apply-license:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Apply and verify GPL-3.0-or-later
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          EXPECTED_GPL_SHA256="3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+          case "${GITHUB_REPOSITORY##*/}" in
+            DocStats) TOOL_NAME="DocStats"; TOOL_DESC="DocStats - inventory and preflight reporting for Adobe InDesign documents" ;;
+            stylefix) TOOL_NAME="StyleFix"; TOOL_DESC="StyleFix - character style auditing for Adobe InDesign documents" ;;
+            NormalFix) TOOL_NAME="NormalFix"; TOOL_DESC="NormalFix - body paragraph style repair for Adobe InDesign documents" ;;
+            TableFix) TOOL_NAME="TableFix"; TOOL_DESC="TableFix - table header semantics repair for Adobe InDesign documents" ;;
+            HeaderFix) TOOL_NAME="HeaderFix"; TOOL_DESC="HeaderFix - section header style normalization for Adobe InDesign documents" ;;
+            ScriptWatch) TOOL_NAME="ScriptWatch"; TOOL_DESC="ScriptWatch - runtime observer console for long-running InDesign ExtendScript jobs" ;;
+            *) echo "::error::Unknown repository ${GITHUB_REPOSITORY}"; exit 1 ;;
+          esac
+          export TOOL_NAME TOOL_DESC
+          if find . -type d \( -name vendor -o -name vendors -o -name third_party -o -name third-party -o -name node_modules -o -name external -o -name externals \) -not -path './.git/*' -print -quit | grep -q .; then echo "::error::Potential vendored third-party code detected."; exit 1; fi
+          if [ -e LICENSE ]; then [ "$(sha256sum LICENSE|awk '{print $1}')" = "$EXPECTED_GPL_SHA256" ] || exit 1; else curl --fail --location --silent --show-error --retry 3 https://www.gnu.org/licenses/gpl-3.0.txt -o LICENSE; [ "$(sha256sum LICENSE|awk '{print $1}')" = "$EXPECTED_GPL_SHA256" ] || { rm -f LICENSE; exit 1; }; git add LICENSE; git commit -m "Add GPL-3.0 license text"; fi
+          python3 - <<'PY'
+          import os,re
+          from pathlib import Path
+          desc=os.environ['TOOL_DESC']; exts={'.jsx','.jsxinc','.py','.html','.css','.js'}; skip={'.git','.github','__pycache__'}
+          lines=[desc,'Copyright (C) 2026 John Darby','','This program is free software: you can redistribute it and/or modify','it under the terms of the GNU General Public License as published by','the Free Software Foundation, either version 3 of the License, or','(at your option) any later version.','','This program is distributed in the hope that it will be useful,','but WITHOUT ANY WARRANTY; without even the implied warranty of','MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the','GNU General Public License for more details.','','You should have received a copy of the GNU General Public License','along with this program.  If not, see <https://www.gnu.org/licenses/>.','','SPDX-License-Identifier: GPL-3.0-or-later']
+          def block(nl): return '/*'+nl+nl.join(' *'+((' '+x) if x else '') for x in lines)+nl+' */'+nl+nl
+          def html(nl): return '<!--'+nl+nl.join(lines)+nl+'-->'+nl+nl
+          def py(nl): return nl.join('#'+((' '+x) if x else '') for x in lines)+nl+nl
+          for p in sorted(Path('.').rglob('*')):
+            if not p.is_file() or p.suffix.lower() not in exts or any(x in skip for x in p.parts): continue
+            raw=p.read_bytes(); bom=raw.startswith(b'\xef\xbb\xbf'); payload=raw[3:] if bom else raw; text=payload.decode('utf-8')
+            if 'SPDX-License-Identifier:' in text: continue
+            nl='\r\n' if b'\r\n' in payload else '\n'; e=p.suffix.lower()
+            if e in {'.jsx','.jsxinc','.css','.js'}: new=block(nl)+text
+            elif e=='.html':
+              m=re.match(r'(?is)^(\s*<!doctype\s+html\s*>)(.*)$',text); new=(m.group(1)+nl+html(nl)+m.group(2).lstrip('\r\n')) if m else html(nl)+text
+            else:
+              ls=text.splitlines(keepends=True); i=1 if ls and ls[0].startswith('#!') else 0; enc=re.compile(r'coding[:=]\s*[-\w.]+')
+              for n in range(min(2,len(ls))):
+                if enc.search(ls[n]): i=max(i,n+1)
+              ls.insert(i,py(nl)); new=''.join(ls)
+            p.write_bytes((b'\xef\xbb\xbf' if bom else b'')+new.encode('utf-8'))
+          PY
+          if ! git diff --quiet -- '*.jsx' '*.jsxinc' '*.py' '*.html' '*.css' '*.js'; then git add -- '*.jsx' '*.jsxinc' '*.py' '*.html' '*.css' '*.js'; git commit -m "Add GPL-3.0-or-later notices to source files"; fi
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          tool=os.environ['TOOL_NAME']; p=Path('README.md'); t=p.read_text(encoding='utf-8'); t=t.replace('A formal open-source license has not yet been selected. Use StyleFix on backed-up documents and validate results independently. The software is provided without warranty.','Use StyleFix on backed-up documents and validate results independently. The software is provided without warranty.')
+          s=f'''## License\n\nCopyright (C) 2026 John Darby\n\n{tool} is free software, released under the GNU General Public License,\nversion 3 or later. You may redistribute and modify it under those terms.\nSee [LICENSE](LICENSE) for the full text.\n\nThis program is distributed in the hope that it will be useful, but WITHOUT\nANY WARRANTY. See the GNU General Public License for details.\n'''
+          if '## License' not in t: t=t.rstrip()+'\n\n'+s
+          p.write_text(t,encoding='utf-8',newline='\n')
+          PY
+          if ! git diff --quiet -- README.md; then git add README.md; git commit -m "Document license in README"; fi
+          python3 - <<'PY'
+          from pathlib import Path
+          exts={'.jsx','.jsxinc','.py','.html','.css','.js'}; skip={'.git','.github','__pycache__'}; bad=[]; count=0
+          for p in Path('.').rglob('*'):
+            if not p.is_file() or p.suffix.lower() not in exts or any(x in skip for x in p.parts): continue
+            count+=1; t=p.read_text(encoding='utf-8-sig')
+            if 'SPDX-License-Identifier: GPL-3.0-or-later' not in t: bad.append(f'missing SPDX: {p}')
+            if '(at your option) any later version.' not in t: bad.append(f'missing or-later: {p}')
+            if 'Copyright (C) 2026 John Darby' not in t or 'Copyright (C) 2026 Johann Darby' in t: bad.append(f'copyright mismatch: {p}')
+          r=Path('README.md').read_text(encoding='utf-8')
+          if '## License' not in r or 'version 3 or later' not in r: bad.append('README license section')
+          if bad: [print('::error::'+x) for x in bad]; raise SystemExit(1)
+          print(f'Verification PASS: {count} authored source files covered')
+          PY
+          [ "$(sha256sum LICENSE|awk '{print $1}')" = "$EXPECTED_GPL_SHA256" ]
+          git push origin HEAD:main
