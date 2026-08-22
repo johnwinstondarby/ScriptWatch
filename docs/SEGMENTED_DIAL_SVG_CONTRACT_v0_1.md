@@ -1,4 +1,4 @@
-# Segmented Dial SVG Contract v0.1
+# Segmented Dial SVG Contract v0.1 (artwork rev 0.2)
 
 **Asset:** `dashboard/instruments/segmented-dial.svg`
 **Status:** v0.1 — interface frozen for compositor development.
@@ -15,12 +15,19 @@ Key radii, for anyone editing the artwork:
 
 | Element | Radius |
 |---|---|
-| Housing outer | 92 |
-| Housing inner / well edge | 78 |
-| Activity tracer ring | 76 |
-| Segment tip | 74 |
-| Segment root | 56 |
-| Scale tick ring | 50.5 – 53.5 |
+| Housing outer | 93 |
+| Housing inner / well edge | 84 |
+| Activity tracer ring | 82.2 |
+| Segment tip | 80 |
+| Segment root | 60 |
+| Scale tick ring | 53 – 56.5 |
+
+Artwork rev 0.2 thinned the bezel and enlarged the data ring after a live
+side-by-side against the legacy CSS dials showed the authored instrument reading
+smaller and dimmer at console scale. `grad-off` was also lightened substantially:
+rev 0.1's unlit ring disappeared into the face at low values, which failed this
+document's own zero-state requirement. **No public interface changed** — seven IDs,
+36 ordered children, hidden-by-default all hold, so the compositor needs no edit.
 
 Segments span a **260° sweep** beginning at **140°** (SVG degrees, +x axis, y down),
 which places the gap at the bottom. Segment *i* sits at `140 + 260·(i/35)`.
@@ -133,7 +140,7 @@ To disable bloom entirely, set the group's `opacity` to `0` — opacity is appli
 filtering, so this costs nothing.
 
 ### activity
-A short luminous arc on the r=76 ring, soft-ended by gradient rather than by blur.
+A short luminous arc on the r=82.2 ring, soft-ended by gradient rather than by blur.
 **It carries no filter on purpose**, so the compositor can `rotate(θ 100 100)` it every
 frame without triggering a filter recomputation.
 
